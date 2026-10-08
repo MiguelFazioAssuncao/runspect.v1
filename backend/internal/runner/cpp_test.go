@@ -254,6 +254,26 @@ int main() {
 	if len(res.Steps) != 1 {
 		t.Errorf("esperava 1 evento, veio %d", len(res.Steps))
 	}
+	if res.Output != "texto solto" {
+		t.Errorf("stdout = %q, esperava texto solto", res.Output)
+	}
+}
+
+func TestRunCapturesPlainOutputWithoutEvents(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <iostream>
+int main() {
+    std::cout << "resultado normal\n";
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	if res.Output != "resultado normal" {
+		t.Fatalf("stdout = %q, esperava resultado normal", res.Output)
+	}
+	if len(res.Steps) != 0 {
+		t.Fatalf("esperava trace vazio, vieram %d eventos", len(res.Steps))
+	}
 }
 
 func TestSandboxHidesHostFiles(t *testing.T) {
@@ -354,5 +374,264 @@ int main() {
 	}
 	if len(res.Steps) != 1000 {
 		t.Errorf("esperava 1000 eventos, veio %d", len(res.Steps))
+	}
+}
+
+func TestRunEmptyVectorAndLineNumbers(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    std::vector<int> v;
+    viz::vector_init("v", v);
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	if items, ok := res.Steps[0].Data["values"].([]any); !ok || len(items) != 0 {
+		t.Errorf("values = %v", res.Steps[0].Data["values"])
+	}
+	if res.Steps[0].Data["line"] != float64(5) {
+		t.Errorf("line = %v", res.Steps[0].Data["line"])
+	}
+}
+func floats(t *testing.T, value any) []float64 {
+	t.Helper()
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("esperava lista, veio %T", value)
+	}
+	out := make([]float64, len(items))
+	for i, item := range items {
+		number, ok := item.(float64)
+		if !ok {
+			t.Fatalf("item %d: esperava número, veio %T", i, item)
+		}
+		out[i] = number
+	}
+	return out
+}
+
+func sameFloats(a, b []float64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestRunEmitsVectorEvents(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    std::vector<int> v{3, -1, 3};
+    viz::vector_init("v", v);
+    viz::vector_compare("v", 0, 1, "c");
+    viz::vector_swap("v", 0, 1, "s");
+    viz::vector_set("v", 2, 9, "w");
+    viz::vector_mark("v", 0, viz::VectorState::Sorted);
+    viz::vector_range("v", 1, 2, "r");
+    viz::vector_discard("v", 0, 0);
+    viz::vector_probe("v", 1, "p");
+    viz::vector_pivot("v", 2, "pv");
+    viz::vector_reset("v");
+    viz::vector_step("v", "fim");
+    viz::vector_result("v", std::vector<int>{-1, 3, 9});
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	want := []string{
+		"VECTOR_INIT", "VECTOR_COMPARE", "VECTOR_SWAP", "VECTOR_SET", "VECTOR_MARK",
+		"VECTOR_RANGE", "VECTOR_DISCARD", "VECTOR_PROBE", "VECTOR_PIVOT", "VECTOR_RESET",
+		"VECTOR_STEP", "VECTOR_RESULT",
+	}
+	if len(res.Steps) != len(want) {
+		t.Fatalf("esperava %d eventos, veio %d", len(want), len(res.Steps))
+	}
+	for i, w := range want {
+		if res.Steps[i].StepEvent != w {
+			t.Errorf("passo %d: esperava %s, veio %s", i, w, res.Steps[i].StepEvent)
+		}
+		if res.Steps[i].Data["name"] != "v" {
+			t.Errorf("passo %d: name = %v", i, res.Steps[i].Data["name"])
+		}
+	}
+	if got := floats(t, res.Steps[0].Data["values"]); !sameFloats(got, []float64{3, -1, 3}) {
+		t.Errorf("values = %v", got)
+	}
+	if res.Steps[1].Data["a"] != float64(0) || res.Steps[1].Data["b"] != float64(1) || res.Steps[1].Data["caption"] != "c" {
+		t.Errorf("compare incorreto: %v", res.Steps[1].Data)
+	}
+	if res.Steps[2].Data["a"] != float64(0) || res.Steps[2].Data["b"] != float64(1) {
+		t.Errorf("swap incorreto: %v", res.Steps[2].Data)
+	}
+	if res.Steps[3].Data["index"] != float64(2) || res.Steps[3].Data["value"] != float64(9) {
+		t.Errorf("set incorreto: %v", res.Steps[3].Data)
+	}
+	if res.Steps[4].Data["state"] != "sorted" {
+		t.Errorf("state = %v", res.Steps[4].Data["state"])
+	}
+	if res.Steps[5].Data["begin"] != float64(1) || res.Steps[5].Data["end"] != float64(2) {
+		t.Errorf("range incorreto: %v", res.Steps[5].Data)
+	}
+	if res.Steps[6].Data["begin"] != float64(0) || res.Steps[6].Data["end"] != float64(0) {
+		t.Errorf("discard incorreto: %v", res.Steps[6].Data)
+	}
+	if res.Steps[7].Data["index"] != float64(1) {
+		t.Errorf("probe incorreto: %v", res.Steps[7].Data)
+	}
+	if res.Steps[8].Data["index"] != float64(2) {
+		t.Errorf("pivot incorreto: %v", res.Steps[8].Data)
+	}
+	if got := floats(t, res.Steps[11].Data["values"]); !sameFloats(got, []float64{-1, 3, 9}) {
+		t.Errorf("result = %v", got)
+	}
+}
+
+func TestRunVectorEmptyNegativeAndRepeated(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    std::vector<int> vazio;
+    std::vector<long long> misto{-5, 7, -5, 7, 0};
+    viz::vector_init("vazio", vazio);
+    viz::vector_init("misto", misto);
+    viz::vector_result("misto", misto);
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	if got := floats(t, res.Steps[0].Data["values"]); len(got) != 0 {
+		t.Errorf("vazio = %v", got)
+	}
+	want := []float64{-5, 7, -5, 7, 0}
+	if got := floats(t, res.Steps[1].Data["values"]); !sameFloats(got, want) {
+		t.Errorf("misto = %v", got)
+	}
+	if got := floats(t, res.Steps[2].Data["values"]); !sameFloats(got, want) {
+		t.Errorf("resultado = %v", got)
+	}
+}
+
+func TestRunVectorCaptionIsEscaped(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    viz::vector_step("v", "linha \"um\"\ndois");
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	if got := res.Steps[0].Data["caption"]; got != "linha \"um\"\ndois" {
+		t.Errorf("caption = %q", got)
+	}
+}
+
+func TestRunVectorEventLines(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    std::vector<int> v{1};
+    viz::vector_init("v", v);
+    viz::vector_step("v", "x");
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	if res.Steps[0].Data["line"] != float64(5) || res.Steps[1].Data["line"] != float64(6) {
+		t.Errorf("linhas incorretas: %v %v", res.Steps[0].Data["line"], res.Steps[1].Data["line"])
+	}
+}
+
+func TestRunEmitsGraphSemanticEvents(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    viz::add_node(1, "a");
+    viz::add_node(2, "b");
+    viz::add_edge(1, 2, 4);
+    viz::graph_node_state(1, viz::NodeState::Visiting);
+    viz::graph_edge_state(1, 2, viz::EdgeState::Relaxed);
+    viz::graph_value(2, "d=4");
+    viz::graph_component(2, 3);
+    viz::graph_path(std::vector<int>{1, 2});
+    viz::graph_reset();
+    viz::step("fim");
+}`, "")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	want := []string{"ADD_NODE", "ADD_NODE", "ADD_EDGE", "GRAPH_NODE", "GRAPH_EDGE", "GRAPH_VALUE", "GRAPH_COMPONENT", "GRAPH_PATH", "GRAPH_RESET", "STEP"}
+	if len(res.Steps) != len(want) {
+		t.Fatalf("esperava %d eventos, veio %d", len(want), len(res.Steps))
+	}
+	for i, w := range want {
+		if res.Steps[i].StepEvent != w {
+			t.Errorf("passo %d: esperava %s, veio %s", i, w, res.Steps[i].StepEvent)
+		}
+	}
+	if res.Steps[3].Data["state"] != "visiting" || res.Steps[3].Data["id"] != float64(1) {
+		t.Errorf("node incorreto: %v", res.Steps[3].Data)
+	}
+	if res.Steps[4].Data["state"] != "relaxed" || res.Steps[4].Data["u"] != float64(1) || res.Steps[4].Data["v"] != float64(2) {
+		t.Errorf("edge incorreto: %v", res.Steps[4].Data)
+	}
+	if res.Steps[5].Data["text"] != "d=4" {
+		t.Errorf("value incorreto: %v", res.Steps[5].Data)
+	}
+	if res.Steps[6].Data["component"] != float64(3) {
+		t.Errorf("component incorreto: %v", res.Steps[6].Data)
+	}
+	if got := floats(t, res.Steps[7].Data["path"]); !sameFloats(got, []float64{1, 2}) {
+		t.Errorf("path = %v", got)
+	}
+}
+
+func TestVectorEventFloodIsCapped(t *testing.T) {
+	r := newRunner(t)
+	r.MaxEvents = 1000
+	res := r.Run(`#include <bits/stdc++.h>
+#include "visualizer.h"
+int main() {
+    for (;;) viz::vector_step("v", "x");
+}`, "")
+	if res.Success {
+		t.Fatal("esperava falha por excesso de eventos")
+	}
+	if !strings.Contains(res.Errors, "Limite") {
+		t.Errorf("mensagem inesperada: %s", res.Errors)
+	}
+	if len(res.Steps) != 1000 {
+		t.Errorf("esperava 1000 eventos, veio %d", len(res.Steps))
+	}
+}
+
+func TestRunWithoutVisualizationEventsKeepsOutput(t *testing.T) {
+	r := newRunner(t)
+	res := r.Run(`#include <bits/stdc++.h>
+using namespace std;
+int main() {
+    int n;
+    cin >> n;
+    cout << n * 2;
+}`, "21\n")
+	if !res.Success {
+		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
+	}
+	if len(res.Steps) != 0 {
+		t.Errorf("esperava trace vazio, vieram %d eventos", len(res.Steps))
+	}
+	if res.Output != "42" {
+		t.Errorf("stdout = %q", res.Output)
 	}
 }

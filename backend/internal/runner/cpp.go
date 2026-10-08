@@ -252,20 +252,36 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 	scanner.Buffer(make([]byte, 0, 64*1024), r.MaxLineBytes)
 
 	steps := make([]domain.TraceStep, 0, 256)
+	var plainOutput strings.Builder
 	limitHit := false
 
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 || line[0] != '{' {
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] != '{' {
+			if plainOutput.Len() > 0 {
+				plainOutput.WriteByte('\n')
+			}
+			plainOutput.Write(line)
 			continue
 		}
 
 		var values map[string]any
 		if err := json.Unmarshal(line, &values); err != nil {
+			if plainOutput.Len() > 0 {
+				plainOutput.WriteByte('\n')
+			}
+			plainOutput.Write(line)
 			continue
 		}
 		event, _ := values["step_event"].(string)
 		if event == "" {
+			if plainOutput.Len() > 0 {
+				plainOutput.WriteByte('\n')
+			}
+			plainOutput.Write(line)
 			continue
 		}
 		delete(values, "step_event")
@@ -289,6 +305,7 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 			return domain.ExecutionResult{
 				Success: false,
 				Steps:   steps,
+				Output:  plainOutput.String(),
 				Errors:  fmt.Sprintf("Limite de %d eventos excedido", r.MaxEvents),
 			}
 		}
@@ -296,20 +313,22 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 			return domain.ExecutionResult{
 				Success: false,
 				Steps:   steps,
+				Output:  plainOutput.String(),
 				Errors:  fmt.Sprintf("Uma linha de saída excedeu o limite de %d MiB", r.MaxLineBytes>>20),
 			}
 		}
-		return domain.ExecutionResult{Success: false, Steps: steps, Errors: "Falha ao ler a saída do programa"}
+		return domain.ExecutionResult{Success: false, Steps: steps, Output: plainOutput.String(), Errors: "Falha ao ler a saída do programa"}
 	}
 
 	waitErr := cmd.Wait()
 	if ctx.Err() == context.DeadlineExceeded {
-		return domain.ExecutionResult{Success: false, Steps: steps, Errors: "Time Limit Exceeded (TLE)"}
+		return domain.ExecutionResult{Success: false, Steps: steps, Output: plainOutput.String(), Errors: "Time Limit Exceeded (TLE)"}
 	}
 	if waitErr != nil {
 		return domain.ExecutionResult{
 			Success: false,
 			Steps:   steps,
+			Output:  plainOutput.String(),
 			Errors:  describeExit(waitErr, stderr.String()),
 		}
 	}
@@ -317,6 +336,7 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 	return domain.ExecutionResult{
 		Success: true,
 		Steps:   steps,
+		Output:  plainOutput.String(),
 		TimeMs:  time.Since(start).Milliseconds(),
 	}
 }

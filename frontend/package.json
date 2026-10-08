@@ -14,7 +14,9 @@
     "@types/d3": "^7.4.3",
     "d3": "^7.9.0",
     "framer-motion": "^14.0.0",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^1.52.0",
+    "mp4-muxer": "^5.2.2",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
