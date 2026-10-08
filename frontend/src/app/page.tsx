@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, CircleHelp, Clock3, Code2, Network } from 'lucide-react';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { GraphCanvas } from '@/components/visualizer/GraphCanvas';
@@ -9,14 +9,31 @@ import { GraphToolbar } from '@/components/visualizer/GraphToolBar';
 import { GraphLegend } from '@/components/visualizer/GraphLegend';
 import { TimelineControls } from '@/components/visualizer/TimelineControls';
 import { StructsPanel } from '@/components/visualizer/StructsPanel';
+import { GraphAnalysisPanel } from '@/components/visualizer/GraphAnalysisPanel';
+import { analyzeGraph } from '@/lib/graphAnalysis';
 import { useVisualizerPlayer } from '@/hooks/useVisualizerPlayer';
 import { examples } from '@/lib/examples';
+import { convertToPureCpp } from '@/lib/codeConversion';
 import { exportJson, exportSvg } from '@/lib/export';
 import type { ExecutionResult, TraceStep } from '@/types/visualizer';
 
+const DEFAULT_CUSTOM_CODE = `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+
+int main() {
+    // Leia a entrada com cin e implemente sua solução aqui.
+    // Use os métodos viz:: comentados no catálogo para visualizar o algoritmo.
+    return 0;
+}`;
+
 export default function Home() {
-  const [code, setCode] = useState(examples[0].code);
+  const [code, setCode] = useState(DEFAULT_CUSTOM_CODE);
+  const [customCode, setCustomCode] = useState(DEFAULT_CUSTOM_CODE);
   const [stdin, setStdin] = useState(examples[0].stdin ?? '');
+  const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
+  const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
+  const [conversionNotice, setConversionNotice] = useState('');
   const [steps, setSteps] = useState<TraceStep[]>([]);
   const [runId, setRunId] = useState(0);
   const [layout, setLayout] = useState<GraphLayout>('force');
@@ -25,6 +42,17 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const player = useVisualizerPlayer(steps);
+  const graphAnalysis = useMemo(
+    () => player.graphState.nodes.length
+      ? analyzeGraph(player.graphState.nodes, player.graphState.edges, player.directed)
+      : null,
+    [player.graphState.nodes, player.graphState.edges, player.directed],
+  );
+  const flowSummary = useMemo(() => {
+    const message = [...player.logs].reverse().find((log) => /Fluxo:\s*\d+,\s*custo:\s*-?\d+/i.test(log));
+    const match = message?.match(/Fluxo:\s*(\d+),\s*custo:\s*(-?\d+)/i);
+    return match ? { flow: Number(match[1]), cost: Number(match[2]) } : null;
+  }, [player.logs]);
 
   useEffect(() => {
     let active = true;
@@ -108,25 +136,81 @@ export default function Home() {
         <div className="editor-column">
           <div className="editor-header">
             <div className="panel-label"><Code2 className="h-3.5 w-3.5" /> código-fonte</div>
-            <select
-              className="example-select"
-              defaultValue={examples[0].id}
-              onChange={(e) => {
-                const ex = examples.find((x) => x.id === e.target.value);
-                if (ex) {
-                  setCode(ex.code);
-                  setStdin(ex.stdin ?? '');
-                }
-              }}
-            >
-              {examples.map((ex) => (
-                <option key={ex.id} value={ex.id}>{ex.name}</option>
-              ))}
-            </select>
+            <div className="editor-tabs" role="tablist" aria-label="Fonte do código">
+              <button
+                className={`editor-tab ${editorTab === 'custom' ? 'editor-tab-active' : ''}`}
+                onClick={() => {
+                  setCode(customCode);
+                  setEditorTab('custom');
+                }}
+                role="tab"
+                aria-selected={editorTab === 'custom'}
+              >
+                seu código
+              </button>
+              <button
+                className={`editor-tab ${editorTab === 'examples' ? 'editor-tab-active' : ''}`}
+                onClick={() => {
+                  const example = examples.find((item) => item.id === selectedExampleId) ?? examples[0];
+                  setCode(example.code);
+                  setStdin(example.stdin ?? '');
+                  setEditorTab('examples');
+                }}
+                role="tab"
+                aria-selected={editorTab === 'examples'}
+              >
+                técnicas
+              </button>
+            </div>
+            {editorTab === 'examples' && (
+              <select
+                className="example-select"
+                value={selectedExampleId}
+                onChange={(e) => {
+                  const ex = examples.find((x) => x.id === e.target.value);
+                  if (ex) {
+                    setSelectedExampleId(ex.id);
+                    setCode(ex.code);
+                    setStdin(ex.stdin ?? '');
+                  }
+                }}
+                aria-label="Selecionar técnica de programação competitiva"
+              >
+                {examples.map((ex) => (
+                  <option key={ex.id} value={ex.id}>{ex.name}</option>
+                ))}
+              </select>
+            )}
           </div>
+          {editorTab === 'custom' && (
+            <div className="editor-actions">
+              <button
+                className="convert-button"
+                onClick={() => {
+                  const converted = convertToPureCpp(customCode);
+                  const blob = new Blob([converted], { type: 'text/x-c++src;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = 'solucao.cpp';
+                  link.click();
+                  URL.revokeObjectURL(url);
+                  setConversionNotice('Arquivo solucao.cpp baixado com C++ puro.');
+                  window.setTimeout(() => setConversionNotice(''), 3500);
+                }}
+                type="button"
+              >
+                baixar C++ puro
+              </button>
+              {conversionNotice && <span className="conversion-notice" role="status">{conversionNotice}</span>}
+            </div>
+          )}
           <CodeEditor
             code={code}
-            setCode={setCode}
+            setCode={(nextCode) => {
+              setCode(nextCode);
+              if (editorTab === 'custom') setCustomCode(nextCode);
+            }}
             onRun={runCode}
             isLoading={isLoading}
             output={output}
@@ -167,6 +251,13 @@ export default function Home() {
                 directed={player.directed}
                 weighted={player.weighted}
                 layout={layout}
+                bridgeEdgeIndexes={graphAnalysis?.bridgeEdgeIndexes}
+                articulationNodeIds={graphAnalysis?.articulationNodeIds}
+                stronglyConnectedComponentByNode={graphAnalysis?.stronglyConnectedComponentByNode}
+                coloringByNode={graphAnalysis?.coloringByNode}
+                negativeCycleEdgeIndexes={graphAnalysis?.negativeCycleEdgeIndexes}
+                minCutEdgeIndexes={graphAnalysis?.minCutEdgeIndexes}
+                minCutSide={graphAnalysis?.minCutSide}
               />
               {player.caption && <div className="frame-caption" role="status">{player.caption}</div>}
               {player.graphState.nodes.length === 0 && (
@@ -179,6 +270,7 @@ export default function Home() {
             </div>
             {player.graphState.nodes.length > 0 && <GraphLegend />}
           </div>
+          <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />
           <StructsPanel structs={player.structs} matrices={player.matrices} />
           <TimelineControls
             currentStep={player.currentStepIndex}
