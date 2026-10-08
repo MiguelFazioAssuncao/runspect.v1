@@ -1,0 +1,207 @@
+import type { TraceStep, GraphNode, GraphEdge } from '@/types/visualizer';
+
+export interface GraphState {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export const isDirected = (steps: TraceStep[]): boolean =>
+  !steps.some((s) => s.step_event === 'SET_DIRECTED' && s.data?.directed === false);
+
+export const isWeighted = (steps: TraceStep[]): boolean =>
+  !steps.some((s) => s.step_event === 'SET_WEIGHTED' && s.data?.weighted === false);
+
+export const isMulti = (steps: TraceStep[]): boolean =>
+  steps.some((s) => s.step_event === 'SET_MULTI' && s.data?.multi === true);
+
+export const frameEnds = (steps: TraceStep[]): number[] => {
+  const ends: number[] = [];
+  steps.forEach((s, i) => {
+    if (s.step_event === 'STEP') ends.push(i);
+  });
+  if (ends.length === 0) return steps.map((_, i) => i);
+  if (ends[ends.length - 1] !== steps.length - 1) ends.push(steps.length - 1);
+  return ends;
+};
+
+export const frameCaption = (steps: TraceStep[], eventIndex: number): string => {
+  const s = steps[eventIndex];
+  return s?.step_event === 'STEP' && typeof s.data?.caption === 'string' ? s.data.caption : '';
+};
+
+export function buildGraphState(
+  steps: TraceStep[],
+  upTo: number,
+  directed: boolean,
+  multi: boolean
+): GraphState {
+  const nodesMap = new Map<number, GraphNode>();
+  const edgesMap = new Map<string, GraphEdge>();
+  const counters = new Map<string, number>();
+
+  const baseKey = (u: number, v: number) =>
+    directed ? `${u}-${v}` : `${Math.min(u, v)}-${Math.max(u, v)}`;
+
+  const findKey = (u: number, v: number, preferFree = false): string | undefined => {
+    const base = baseKey(u, v);
+    if (!multi) return edgesMap.has(base) ? base : undefined;
+    const prefix = `${base}#`;
+    let first: string | undefined;
+    for (const [key, edge] of Array.from(edgesMap.entries())) {
+      if (!key.startsWith(prefix)) continue;
+      if (first === undefined) first = key;
+      if (!preferFree || !edge.highlighted) return key;
+    }
+    return first;
+  };
+
+  for (let i = 0; i <= upTo && i < steps.length; i++) {
+    const step = steps[i];
+    const data = step.data || {};
+
+    switch (step.step_event) {
+      case 'ADD_NODE': {
+        if (data.id !== undefined) {
+          nodesMap.set(data.id, {
+            id: data.id,
+            label: data.label ?? `Node ${data.id}`,
+            color: '#3b82f6',
+          });
+        }
+        break;
+      }
+      case 'ADD_EDGE': {
+        if (data.u !== undefined && data.v !== undefined) {
+          const base = baseKey(data.u, data.v);
+          let key = base;
+          if (multi) {
+            const next = (counters.get(base) ?? 0) + 1;
+            counters.set(base, next);
+            key = `${base}#${next}`;
+          }
+          edgesMap.set(key, {
+            source: data.u,
+            target: data.v,
+            weight: data.weight ?? 1,
+            color: '#64748b',
+          });
+        }
+        break;
+      }
+      case 'REMOVE_NODE': {
+        if (data.id !== undefined) {
+          const removedId = data.id;
+          nodesMap.delete(removedId);
+          Array.from(edgesMap.entries()).forEach(([key, edge]) => {
+            if (edge.source === removedId || edge.target === removedId) {
+              edgesMap.delete(key);
+            }
+          });
+        }
+        break;
+      }
+      case 'REMOVE_EDGE': {
+        if (data.u !== undefined && data.v !== undefined) {
+          const key = findKey(data.u, data.v);
+          if (key !== undefined) edgesMap.delete(key);
+        }
+        break;
+      }
+      case 'SET_WEIGHT': {
+        if (data.u !== undefined && data.v !== undefined) {
+          const key = findKey(data.u, data.v);
+          const edge = key !== undefined ? edgesMap.get(key) : undefined;
+          if (key !== undefined && edge) {
+            edgesMap.set(key, { ...edge, weight: data.weight ?? edge.weight });
+          }
+        }
+        break;
+      }
+      case 'HIGHLIGHT': {
+        if (data.id !== undefined && nodesMap.has(data.id)) {
+          const node = nodesMap.get(data.id)!;
+          nodesMap.set(data.id, {
+            ...node,
+            color: data.color || '#ef4444',
+            highlighted: true,
+          });
+        }
+        break;
+      }
+      case 'HIGHLIGHT_EDGE': {
+        if (data.u !== undefined && data.v !== undefined) {
+          const key = findKey(data.u, data.v, true);
+          const edge = key !== undefined ? edgesMap.get(key) : undefined;
+          if (key !== undefined && edge) {
+            edgesMap.set(key, {
+              ...edge,
+              color: data.color || '#ef4444',
+              highlighted: true,
+            });
+          }
+        }
+        break;
+      }
+      case 'RESET_COLORS': {
+        Array.from(nodesMap.entries()).forEach(([id, node]) => {
+          nodesMap.set(id, { ...node, color: '#3b82f6', highlighted: false });
+        });
+        Array.from(edgesMap.entries()).forEach(([key, edge]) => {
+          edgesMap.set(key, { ...edge, color: '#64748b', highlighted: false });
+        });
+        break;
+      }
+      case 'SET_LABEL': {
+        if (data.id !== undefined && nodesMap.has(data.id)) {
+          const node = nodesMap.get(data.id)!;
+          nodesMap.set(data.id, { ...node, label: String(data.label ?? '') });
+        }
+        break;
+      }
+      case 'SET_COLOR': {
+        if (data.id !== undefined && nodesMap.has(data.id)) {
+          const node = nodesMap.get(data.id)!;
+          nodesMap.set(data.id, {
+            ...node,
+            color: data.color || '#ef4444',
+            highlighted: true,
+          });
+        }
+        break;
+      }
+      case 'SET_BADGE': {
+        if (data.id !== undefined && nodesMap.has(data.id)) {
+          const node = nodesMap.get(data.id)!;
+          nodesMap.set(data.id, { ...node, badge: data.text ? String(data.text) : undefined });
+        }
+        break;
+      }
+      case 'SET_EDGE_STYLE': {
+        if (data.u !== undefined && data.v !== undefined) {
+          const key = findKey(data.u, data.v);
+          const edge = key !== undefined ? edgesMap.get(key) : undefined;
+          if (key !== undefined && edge) {
+            const style = data.style === 'dashed' || data.style === 'dotted' ? data.style : 'solid';
+            edgesMap.set(key, { ...edge, style });
+          }
+        }
+        break;
+      }
+      case 'SET_EDGE_LABEL': {
+        if (data.u !== undefined && data.v !== undefined) {
+          const key = findKey(data.u, data.v);
+          const edge = key !== undefined ? edgesMap.get(key) : undefined;
+          if (key !== undefined && edge) {
+            edgesMap.set(key, { ...edge, label: data.label ?? undefined });
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  return {
+    nodes: Array.from(nodesMap.values()),
+    edges: Array.from(edgesMap.values()),
+  };
+}
