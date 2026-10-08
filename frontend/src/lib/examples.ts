@@ -5,650 +5,150 @@ export interface Example {
   stdin?: string;
 }
 
-export const examples: Example[] = [
+const baseExamples: Example[] = [
   {
-    id: 'inicial',
-    name: 'Inicial',
-    stdin: `2 1
-1 2 4
+    id: 'binary-search',
+    name: 'Busca binária',
+    stdin: `8
+1 3 5 7 9 11 13 15
+11
 `,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n, m;
-    cin >> n >> m;
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (int i = 0; i < m; i++) {
-        int u, v, peso;
-        cin >> u >> v >> peso;
-        viz::add_edge(u, v, peso);
+    int n, alvo;
+    cin >> n;
+    vector<int> a(n);
+    for (int& x : a) cin >> x;
+    cin >> alvo;
+    for (int i = 0; i < n; i++) viz::add_node(i + 1, to_string(a[i]));
+    int l = 0, r = n - 1, resposta = -1;
+    while (l <= r) {
+        int m = l + (r - l) / 2;
+        viz::set_color(m + 1, "yellow");
+        viz::show("intervalo", vector<int>{l, r, m});
+        if (a[m] == alvo) { resposta = m; viz::set_color(m + 1, "emerald"); break; }
+        if (a[m] < alvo) l = m + 1;
+        else r = m - 1;
     }
-    if (n >= 1) viz::highlight(1, "emerald");
-    if (n >= 2) viz::highlight(2, "orange");
+    viz::print(resposta == -1 ? "Elemento nao encontrado" : "Indice: " + to_string(resposta));
 }`,
   },
   {
-    id: 'kahn',
-    name: 'Ordenação topológica (Kahn)',
-    stdin: `8 9
-1 2
+    id: 'prefix-sum',
+    name: 'Soma prefixada e consultas',
+    stdin: `6
+2 4 1 7 3 5
+3
 1 3
-2 4
-3 4
-3 5
+2 5
 4 6
-5 6
-6 7
-8 5
 `,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n, m;
-    cin >> n >> m;
-    vector<pair<int,int>> arestas(m);
-    for (auto& [u, v] : arestas) cin >> u >> v;
-
-    vector<vector<int>> adj(n + 1);
-    vector<int> grau(n + 1, 0);
-
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v] : arestas) {
-        viz::add_edge(u, v, 1);
-        adj[u].push_back(v);
-        grau[v]++;
-    }
-
-    queue<int> q;
-    vector<int> ordem;
-
-    auto mostrar = [&]() {
-        vector<string> f, g;
-        queue<int> c = q;
-        while (!c.empty()) { f.push_back(to_string(c.front())); c.pop(); }
-        for (int i = 1; i <= n; i++) g.push_back(to_string(i) + "=" + to_string(grau[i]));
-        viz::show("fila", f);
-        viz::show("grau", g);
-        viz::show("ordem", ordem);
-    };
-
-    for (int i = 1; i <= n; i++) {
-        if (grau[i] == 0) {
-            q.push(i);
-            viz::set_color(i, "yellow");
-        }
-    }
-    mostrar();
-
-    while (!q.empty()) {
-        int u = q.front(); q.pop();
-        ordem.push_back(u);
-        viz::set_color(u, "orange");
-
-        for (int v : adj[u]) {
-            grau[v]--;
-            viz::highlight_edge(u, v, "emerald");
-            if (grau[v] == 0) {
-                q.push(v);
-                viz::set_color(v, "yellow");
-            }
-        }
-
-        viz::set_color(u, "emerald");
-        mostrar();
-    }
-
-    if ((int)ordem.size() == n) {
-        viz::print("Ordem topologica valida");
-    } else {
-        viz::print("Ciclo detectado: " + to_string(n - (int)ordem.size()) + " nos ficaram de fora");
+    int n, q;
+    cin >> n;
+    vector<long long> pref(n + 1);
+    for (int i = 1; i <= n; i++) { cin >> pref[i]; pref[i] += pref[i - 1]; }
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(pref[i] - pref[i - 1]));
+    cin >> q;
+    while (q--) {
+        int l, r; cin >> l >> r;
+        long long resposta = pref[r] - pref[l - 1];
+        for (int i = l; i <= r; i++) viz::set_color(i, "emerald");
+        viz::show("consulta", vector<int>{l, r});
+        viz::print("Soma [" + to_string(l) + "," + to_string(r) + "]: " + to_string(resposta));
     }
 }`,
   },
   {
-    id: 'bfs',
-    name: 'Busca em largura (BFS)',
-    stdin: `7 6
+    id: 'two-pointers',
+    name: 'Dois ponteiros',
+    stdin: `7 10
+1 2 3 4 6 8 9
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+
+int main() {
+    int n, alvo; cin >> n >> alvo;
+    vector<int> a(n);
+    for (int& x : a) cin >> x;
+    for (int i = 0; i < n; i++) viz::add_node(i + 1, to_string(a[i]));
+    int l = 0, r = n - 1;
+    while (l < r) {
+        viz::set_color(l + 1, "yellow"); viz::set_color(r + 1, "orange");
+        viz::show("ponteiros", vector<int>{l, r});
+        if (a[l] + a[r] == alvo) {
+            viz::highlight_edge(l + 1, r + 1, "emerald");
+            viz::print("Par encontrado: " + to_string(a[l]) + " + " + to_string(a[r]));
+            return 0;
+        }
+        if (a[l] + a[r] < alvo) l++; else r--;
+    }
+    viz::print("Nenhum par encontrado");
+}`,
+  },
+  {
+    id: 'dsu',
+    name: 'DSU e componentes dinâmicas',
+    stdin: `5 4
 1 2
-1 3
-2 4
-2 5
-3 6
-3 7
-1
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    int n, m;
-    cin >> n >> m;
-    vector<pair<int,int>> arestas(m);
-    for (auto& [u, v] : arestas) cin >> u >> v;
-
-    viz::set_directed(false);
-    viz::set_weighted(false);
-
-    vector<vector<int>> adj(n + 1);
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v] : arestas) {
-        viz::add_edge(u, v);
-        adj[u].push_back(v);
-        adj[v].push_back(u);
-    }
-
-    vector<int> dist(n + 1, -1);
-    queue<int> q;
-
-    auto mostrar = [&]() {
-        vector<string> f;
-        queue<int> c = q;
-        while (!c.empty()) { f.push_back(to_string(c.front())); c.pop(); }
-        viz::show("fila", f);
-        vector<vector<string>> t(2);
-        for (int i = 1; i <= n; i++) {
-            t[0].push_back(to_string(i));
-            t[1].push_back(dist[i] < 0 ? "-" : to_string(dist[i]));
-        }
-        viz::show_matrix("dist", t);
-    };
-
-    int origem;
-    cin >> origem;
-    dist[origem] = 0;
-    q.push(origem);
-    viz::set_color(origem, "yellow");
-    mostrar();
-
-    while (!q.empty()) {
-        int u = q.front(); q.pop();
-        viz::set_color(u, "orange");
-        for (int v : adj[u]) {
-            if (dist[v] == -1) {
-                dist[v] = dist[u] + 1;
-                q.push(v);
-                viz::highlight_edge(u, v, "emerald");
-                viz::set_color(v, "yellow");
-            }
-        }
-        viz::set_color(u, "emerald");
-        mostrar();
-    }
-    viz::print("BFS concluida");
-}`,
-  },
-  {
-    id: 'dijkstra',
-    name: 'Menor caminho (Dijkstra)',
-    stdin: `6 9
-1 2 7
-1 3 9
-1 6 14
-2 3 10
-2 4 15
-3 4 11
-3 6 2
-4 5 6
-6 5 9
+2 3
+4 5
 1 5
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    int n, m;
-    cin >> n >> m;
-    vector<array<int,3>> es(m);
-    for (auto& [u, v, w] : es) cin >> u >> v >> w;
-    int origem, destino;
-    cin >> origem >> destino;
-
-    viz::set_directed(true);
-    vector<vector<pair<int,int>>> adj(n + 1);
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v, w] : es) {
-        viz::add_edge(u, v, w);
-        adj[u].push_back({v, w});
-    }
-
-    const int INF = 1e9;
-    vector<int> dist(n + 1, INF), pai(n + 1, 0);
-    vector<bool> feito(n + 1, false);
-    priority_queue<pair<int,int>, vector<pair<int,int>>, greater<>> pq;
-
-    auto mostrar = [&]() {
-        vector<vector<string>> t(2);
-        for (int i = 1; i <= n; i++) {
-            t[0].push_back(to_string(i));
-            t[1].push_back(dist[i] == INF ? "∞" : to_string(dist[i]));
-        }
-        viz::show_matrix("dist", t);
-    };
-
-    dist[origem] = 0;
-    pq.push({0, origem});
-    viz::set_color(origem, "yellow");
-    mostrar();
-
-    while (!pq.empty()) {
-        auto [d, u] = pq.top(); pq.pop();
-        if (feito[u]) continue;
-        feito[u] = true;
-        viz::set_color(u, "orange");
-
-        for (auto [v, w] : adj[u]) {
-            if (dist[u] + w < dist[v]) {
-                dist[v] = dist[u] + w;
-                pai[v] = u;
-                pq.push({dist[v], v});
-                viz::highlight_edge(u, v, "yellow");
-                if (!feito[v]) viz::set_color(v, "yellow");
-            }
-        }
-        viz::set_color(u, "emerald");
-        mostrar();
-    }
-
-    viz::reset_colors();
-    vector<int> caminho;
-    for (int x = destino; x; x = pai[x]) caminho.push_back(x);
-    reverse(caminho.begin(), caminho.end());
-    viz::highlight_path(caminho, "red");
-    viz::print("Distancia " + to_string(origem) + " -> " + to_string(destino) + ": " + to_string(dist[destino]));
-}`,
-  },
-  {
-    id: 'dfs',
-    name: 'Busca em profundidade (DFS)',
-    stdin: `8 7
-1 2
-1 3
-2 4
-2 5
-3 6
-5 7
-6 8
-1
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int n;
-vector<vector<int>> adj;
-vector<int> estado, saida;
-
-void dfs(int u) {
-    estado[u] = 1;
-    viz::set_color(u, "orange");
-    for (int v : adj[u]) {
-        if (estado[v] == 0) {
-            viz::highlight_edge(u, v, "emerald");
-            dfs(v);
-        }
-    }
-    estado[u] = 2;
-    saida.push_back(u);
-    viz::set_color(u, "emerald");
-    viz::show("saida", saida);
-}
-
-int main() {
-    int m, inicio;
-    cin >> n >> m;
-    vector<pair<int,int>> arestas(m);
-    for (auto& [u, v] : arestas) cin >> u >> v;
-    cin >> inicio;
-    viz::set_directed(false);
-    viz::set_weighted(false);
-
-    adj.assign(n + 1, {});
-    estado.assign(n + 1, 0);
-
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v] : arestas) {
-        viz::add_edge(u, v);
-        adj[u].push_back(v);
-        adj[v].push_back(u);
-    }
-
-    dfs(inicio);
-    viz::print("DFS concluida");
-}`,
-  },
-  {
-    id: 'prim',
-    name: 'Árvore geradora mínima (Prim)',
-    stdin: `6 8
-1 2 4
-1 3 3
-2 3 1
-2 4 2
-3 4 4
-4 5 2
-4 6 3
-5 6 6
-1
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    int n, m, inicio;
-    cin >> n >> m;
-    vector<array<int,3>> es(m);
-    for (auto& [u, v, w] : es) cin >> u >> v >> w;
-    cin >> inicio;
-
-    viz::set_directed(false);
-    vector<vector<pair<int,int>>> adj(n + 1);
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v, w] : es) {
-        viz::add_edge(u, v, w);
-        adj[u].push_back({v, w});
-        adj[v].push_back({u, w});
-    }
-
-    vector<bool> dentro(n + 1, false);
-    priority_queue<array<int,3>, vector<array<int,3>>, greater<>> pq;
-    pq.push({0, inicio, 0});
-    int total = 0;
-
-    while (!pq.empty()) {
-        auto [w, u, pai] = pq.top(); pq.pop();
-        if (dentro[u]) continue;
-        dentro[u] = true;
-        total += w;
-        viz::set_color(u, "emerald");
-        if (pai) viz::highlight_edge(pai, u, "emerald");
-        for (auto [v, c] : adj[u]) {
-            if (!dentro[v]) pq.push({c, v, u});
-        }
-        viz::show("custo", vector<int>{total});
-    }
-
-    viz::print("Custo da AGM: " + to_string(total));
-}`,
-  },
-  {
-    id: 'kruskal',
-    name: 'Árvore geradora mínima (Kruskal)',
-    stdin: `6 8
-1 2 4
-1 3 3
-2 3 1
-2 4 2
-3 4 4
-4 5 2
-4 6 3
-5 6 6
 `,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 struct DSU {
-    vector<int> p;
-    DSU(int n) : p(n + 1) { iota(p.begin(), p.end(), 0); }
+    vector<int> p, sz;
+    DSU(int n): p(n + 1), sz(n + 1, 1) { iota(p.begin(), p.end(), 0); }
     int find(int x) { return p[x] == x ? x : p[x] = find(p[x]); }
     bool unite(int a, int b) {
-        a = find(a);
-        b = find(b);
+        a = find(a); b = find(b);
         if (a == b) return false;
-        p[a] = b;
-        return true;
+        if (sz[a] < sz[b]) swap(a, b);
+        p[b] = a; sz[a] += sz[b]; return true;
     }
 };
 
 int main() {
-    int n, m;
-    cin >> n >> m;
-    vector<array<int,3>> es(m);
-    for (auto& [u, v, w] : es) cin >> u >> v >> w;
-
-    viz::set_directed(false);
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v, w] : es) viz::add_edge(u, v, w);
-
-    sort(es.begin(), es.end(), [](const array<int,3>& a, const array<int,3>& b) {
-        return a[2] < b[2];
-    });
-
+    int n, m; cin >> n >> m;
     DSU dsu(n);
-    int total = 0;
-
-    for (auto [u, v, w] : es) {
-        viz::highlight_edge(u, v, "yellow");
-        if (dsu.unite(u, v)) {
-            total += w;
-            viz::highlight_edge(u, v, "emerald");
-            viz::set_color(u, "emerald");
-            viz::set_color(v, "emerald");
-        } else {
-            viz::highlight_edge(u, v, "red");
-        }
-        vector<string> raiz;
-        for (int i = 1; i <= n; i++) raiz.push_back(to_string(i) + "->" + to_string(dsu.find(i)));
-        viz::show("raiz", raiz);
-        viz::show("custo", vector<int>{total});
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
+    for (int i = 0; i < m; i++) {
+        int u, v; cin >> u >> v;
+        viz::add_edge(u, v);
+        bool novo = dsu.unite(u, v);
+        viz::highlight_edge(u, v, novo ? "emerald" : "red");
+        for (int x = 1; x <= n; x++) viz::set_badge(x, "c=" + to_string(dsu.find(x)));
+        viz::step(novo ? "componentes unidas" : "ciclo detectado");
     }
-
-    viz::print("Custo da AGM: " + to_string(total));
+    set<int> raizes;
+    for (int i = 1; i <= n; i++) raizes.insert(dsu.find(i));
+    viz::print("Componentes: " + to_string(raizes.size()));
 }`,
   },
   {
-    id: 'componentes',
-    name: 'Componentes conexas',
-    stdin: `9 6
+    id: 'bfs-shortest-path',
+    name: 'BFS: menor caminho não ponderado',
+    stdin: `7 7
 1 2
-2 3
+1 3
+2 4
+3 4
 4 5
 5 6
-6 4
-7 8
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    int n, m;
-    cin >> n >> m;
-    vector<pair<int,int>> arestas(m);
-    for (auto& [u, v] : arestas) cin >> u >> v;
-
-    viz::set_directed(false);
-    viz::set_weighted(false);
-
-    vector<vector<int>> adj(n + 1);
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v] : arestas) {
-        viz::add_edge(u, v);
-        adj[u].push_back(v);
-        adj[v].push_back(u);
-    }
-
-    vector<string> cores = {"emerald", "orange", "sky", "purple", "pink", "yellow"};
-    vector<int> comp(n + 1, -1);
-    int total = 0;
-
-    for (int s = 1; s <= n; s++) {
-        if (comp[s] != -1) continue;
-        string cor = cores[total % cores.size()];
-        stack<int> st;
-        st.push(s);
-        comp[s] = total;
-        vector<int> membros;
-
-        while (!st.empty()) {
-            int u = st.top(); st.pop();
-            membros.push_back(u);
-            viz::set_color(u, cor);
-            for (int v : adj[u]) {
-                if (comp[v] == -1) {
-                    comp[v] = total;
-                    viz::highlight_edge(u, v, cor);
-                    st.push(v);
-                }
-            }
-        }
-
-        viz::show("componente " + to_string(total + 1), membros);
-        total++;
-    }
-
-    viz::print("Componentes: " + to_string(total));
-}`,
-  },
-  {
-    id: 'ciclo',
-    name: 'Detecção de ciclo (dirigido)',
-    stdin: `6 6
-1 2
-2 3
-3 4
-4 2
-1 5
-5 6
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int n;
-vector<vector<int>> adj;
-vector<int> estado, pilha;
-
-bool dfs(int u) {
-    estado[u] = 1;
-    pilha.push_back(u);
-    viz::set_color(u, "orange");
-    viz::show("pilha", pilha);
-
-    for (int v : adj[u]) {
-        viz::highlight_edge(u, v, "yellow");
-        if (estado[v] == 1) {
-            viz::highlight_edge(u, v, "red");
-            viz::set_color(v, "red");
-            viz::print("Ciclo encontrado ao chegar em " + to_string(v));
-            return true;
-        }
-        if (estado[v] == 0 && dfs(v)) return true;
-    }
-
-    estado[u] = 2;
-    pilha.pop_back();
-    viz::set_color(u, "emerald");
-    viz::show("pilha", pilha);
-    return false;
-}
-
-int main() {
-    int m;
-    cin >> n >> m;
-    vector<pair<int,int>> arestas(m);
-    for (auto& [u, v] : arestas) cin >> u >> v;
-
-    adj.assign(n + 1, {});
-    estado.assign(n + 1, 0);
-
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v] : arestas) {
-        viz::add_edge(u, v);
-        adj[u].push_back(v);
-    }
-
-    bool achou = false;
-    for (int i = 1; i <= n && !achou; i++) {
-        if (estado[i] == 0) achou = dfs(i);
-    }
-
-    if (!achou) viz::print("Grafo aciclico");
-}`,
-  },
-  {
-    id: 'floyd',
-    name: 'Todos os pares (Floyd-Warshall)',
-    stdin: `4 4
-1 2 5
-1 4 10
-2 3 3
-3 4 1
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    int n, m;
-    cin >> n >> m;
-    const int INF = 1000000000;
-    vector<array<int,3>> es(m);
-    for (auto& [u, v, w] : es) cin >> u >> v >> w;
-
-    viz::set_directed(true);
-    vector<vector<int>> d(n + 1, vector<int>(n + 1, INF));
-    for (int i = 1; i <= n; i++) {
-        viz::add_node(i, to_string(i));
-        d[i][i] = 0;
-    }
-    for (auto [u, v, w] : es) {
-        viz::add_edge(u, v, w);
-        d[u][v] = w;
-    }
-
-    auto mostrar = [&](int k) {
-        vector<vector<string>> t(n + 1, vector<string>(n + 1));
-        t[0][0] = "k=" + to_string(k);
-        for (int i = 1; i <= n; i++) {
-            t[0][i] = to_string(i);
-            t[i][0] = to_string(i);
-            for (int j = 1; j <= n; j++) {
-                t[i][j] = d[i][j] >= INF ? "∞" : to_string(d[i][j]);
-            }
-        }
-        viz::show_matrix("dist", t);
-    };
-
-    mostrar(0);
-
-    for (int k = 1; k <= n; k++) {
-        viz::set_color(k, "orange");
-        for (int i = 1; i <= n; i++) {
-            for (int j = 1; j <= n; j++) {
-                if (d[i][k] < INF && d[k][j] < INF && d[i][k] + d[k][j] < d[i][j]) {
-                    d[i][j] = d[i][k] + d[k][j];
-                }
-            }
-        }
-        mostrar(k);
-        viz::set_color(k, "emerald");
-    }
-
-    viz::print("Distancia 1 -> 4: " + to_string(d[1][4]));
-}`,
-  },
-  {
-    id: 'fluxo',
-    name: 'Fluxo máximo (Edmonds-Karp)',
-    stdin: `6 9
-1 2 10
-1 3 10
-2 3 2
-2 4 4
-2 5 8
-3 5 9
-4 6 10
-5 4 6
-5 6 10
-1 6
+6 7
+1 7
 `,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
@@ -657,96 +157,6 @@ using namespace std;
 int main() {
     int n, m, s, t;
     cin >> n >> m;
-    vector<array<int,3>> es(m);
-    for (auto& [u, v, c] : es) cin >> u >> v >> c;
-    cin >> s >> t;
-
-    viz::set_directed(true);
-    vector<vector<int>> cap(n + 1, vector<int>(n + 1, 0));
-    vector<vector<bool>> original(n + 1, vector<bool>(n + 1, false));
-    vector<vector<int>> adj(n + 1);
-
-    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
-    for (auto [u, v, c] : es) {
-        viz::add_edge(u, v, c);
-        cap[u][v] += c;
-        original[u][v] = true;
-        adj[u].push_back(v);
-        adj[v].push_back(u);
-    }
-
-    int fluxo = 0;
-
-    while (true) {
-        vector<int> pai(n + 1, 0);
-        queue<int> q;
-        q.push(s);
-        pai[s] = s;
-
-        while (!q.empty() && !pai[t]) {
-            int u = q.front(); q.pop();
-            for (int v : adj[u]) {
-                if (!pai[v] && cap[u][v] > 0) {
-                    pai[v] = u;
-                    q.push(v);
-                }
-            }
-        }
-
-        if (!pai[t]) break;
-
-        int gargalo = INT_MAX;
-        vector<int> caminho;
-        for (int x = t; x != s; x = pai[x]) {
-            gargalo = min(gargalo, cap[pai[x]][x]);
-            caminho.push_back(x);
-        }
-        caminho.push_back(s);
-        reverse(caminho.begin(), caminho.end());
-
-        viz::reset_colors();
-        viz::highlight_path(caminho, "yellow");
-
-        for (int x = t; x != s; x = pai[x]) {
-            int u = pai[x];
-            cap[u][x] -= gargalo;
-            cap[x][u] += gargalo;
-            if (original[u][x]) viz::set_weight(u, x, cap[u][x]);
-            if (original[x][u]) viz::set_weight(x, u, cap[x][u]);
-        }
-
-        fluxo += gargalo;
-        viz::show("fluxo", vector<int>{fluxo});
-        viz::print("Caminho aumentante com gargalo " + to_string(gargalo));
-    }
-
-    viz::reset_colors();
-    viz::print("Fluxo maximo: " + to_string(fluxo));
-}`,
-  },
-  {
-    id: 'bfs-frames',
-    name: 'BFS (frames)',
-    stdin: `6 7
-1 2
-1 3
-2 4
-3 4
-4 5
-5 6
-3 6
-`,
-    code: `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    int n, m;
-    cin >> n >> m;
-
-    viz::set_directed(false);
-    viz::set_weighted(false);
-
     vector<vector<int>> adj(n + 1);
     for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
     for (int i = 0; i < m; i++) {
@@ -756,32 +166,370 @@ int main() {
         adj[u].push_back(v);
         adj[v].push_back(u);
     }
-    viz::step("Grafo lido: " + to_string(n) + " nos, " + to_string(m) + " arestas");
-
-    vector<int> dist(n + 1, -1);
+    cin >> s >> t;
+    vector<int> d(n + 1, -1), pai(n + 1);
     queue<int> q;
-    dist[1] = 0;
-    q.push(1);
-    viz::set_color(1, "yellow");
-    viz::set_badge(1, "d=0");
-    viz::step("Origem: 1");
-
+    q.push(s);
+    d[s] = 0;
     while (!q.empty()) {
-        int u = q.front(); q.pop();
+        int u = q.front();
+        q.pop();
         viz::set_color(u, "orange");
         for (int v : adj[u]) {
-            if (dist[v] == -1) {
-                dist[v] = dist[u] + 1;
-                q.push(v);
-                viz::highlight_edge(u, v, "emerald");
-                viz::set_color(v, "yellow");
-                viz::set_badge(v, "d=" + to_string(dist[v]));
-            }
+            if (d[v] != -1) continue;
+            d[v] = d[u] + 1;
+            pai[v] = u;
+            q.push(v);
+            viz::highlight_edge(u, v, "emerald");
+            viz::set_badge(v, "d=" + to_string(d[v]));
         }
         viz::set_color(u, "emerald");
-        viz::step("Processou " + to_string(u));
     }
-    viz::print("BFS concluida");
+    vector<int> caminho;
+    for (int v = t; v; v = pai[v]) caminho.push_back(v);
+    reverse(caminho.begin(), caminho.end());
+    if (d[t] != -1) viz::highlight_path(caminho, "red");
+    viz::print(d[t] == -1 ? "Sem caminho" : "Distancia: " + to_string(d[t]));
 }`,
   },
+  {
+    id: 'dijkstra',
+    name: 'Dijkstra',
+    stdin: `5 7
+1 2 4
+1 3 2
+2 3 1
+2 4 5
+3 4 8
+3 5 10
+4 5 2
+1 5
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+
+int main() {
+    int n, m, s, t;
+    cin >> n >> m;
+    vector<vector<pair<int,int>>> adj(n + 1);
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
+    for (int i = 0; i < m; i++) {
+        int u, v, w;
+        cin >> u >> v >> w;
+        viz::add_edge(u, v, w);
+        adj[u].push_back({v, w});
+        adj[v].push_back({u, w});
+    }
+    cin >> s >> t;
+    const int INF = 1e9;
+    vector<int> d(n + 1, INF), pai(n + 1);
+    priority_queue<pair<int,int>, vector<pair<int,int>>, greater<>> pq;
+    d[s] = 0;
+    pq.push({0, s});
+    while (!pq.empty()) {
+        auto [du, u] = pq.top();
+        pq.pop();
+        if (du != d[u]) continue;
+        viz::set_color(u, "orange");
+        for (auto [v, w] : adj[u]) {
+            if (d[v] <= d[u] + w) continue;
+            d[v] = d[u] + w;
+            pai[v] = u;
+            pq.push({d[v], v});
+            viz::highlight_edge(u, v, "yellow");
+            viz::set_badge(v, to_string(d[v]));
+        }
+        viz::set_color(u, "emerald");
+    }
+    vector<int> path;
+    for (int v = t; v; v = pai[v]) path.push_back(v);
+    reverse(path.begin(), path.end());
+    if (d[t] < INF) viz::highlight_path(path, "red");
+    viz::print(d[t] == INF ? "Sem caminho" : "Distancia minima: " + to_string(d[t]));
+}`,
+  },
+  {
+    id: 'kruskal',
+    name: 'Kruskal: árvore geradora mínima',
+    stdin: `5 7
+1 2 4
+1 3 2
+2 3 1
+2 4 5
+3 4 8
+3 5 10
+4 5 2
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+struct DSU {
+    vector<int> p;
+
+    DSU(int n) : p(n + 1) {
+        iota(p.begin(), p.end(), 0);
+    }
+
+    int find(int x) {
+        return p[x] == x ? x : p[x] = find(p[x]);
+    }
+
+    bool join(int a, int b) {
+        a = find(a);
+        b = find(b);
+        if (a == b) return false;
+        p[a] = b;
+        return true;
+    }
+};
+int main() {
+    int n, m;
+    cin >> n >> m;
+    vector<array<int, 3>> e(m);
+    for (auto& [u, v, w] : e) cin >> u >> v >> w;
+
+    viz::set_directed(false);
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
+    for (auto [u, v, w] : e) viz::add_edge(u, v, w);
+
+    sort(e.begin(), e.end(), [](auto a, auto b) {
+        return a[2] < b[2];
+    });
+    DSU dsu(n);
+    int total = 0;
+    for (auto [u, v, w] : e) {
+        viz::highlight_edge(u, v, "yellow");
+        if (dsu.join(u, v)) {
+            total += w;
+            viz::highlight_edge(u, v, "emerald");
+        } else {
+            viz::highlight_edge(u, v, "red");
+        }
+        viz::show("custo", vector<int>{total});
+    }
+    viz::print("Custo da AGM: " + to_string(total));
+}`,
+  },
+  {
+    id: 'topological-sort',
+    name: 'Kahn: ordenação topológica',
+    stdin: `6 6
+1 2
+1 3
+2 4
+3 4
+4 5
+4 6
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+int main() {
+    int n, m;
+    cin >> n >> m;
+    vector<vector<int>> adj(n + 1);
+    vector<int> in(n + 1);
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
+    for (int i = 0; i < m; i++) {
+        int u, v;
+        cin >> u >> v;
+        viz::add_edge(u, v);
+        adj[u].push_back(v);
+        in[v]++;
+    }
+    queue<int> q;
+    for (int i = 1; i <= n; i++) if (!in[i]) q.push(i);
+    vector<int> order;
+    while (!q.empty()) {
+        int u = q.front();
+        q.pop();
+        order.push_back(u);
+        viz::set_color(u, "emerald");
+        for (int v : adj[u]) {
+            viz::highlight_edge(u, v, "yellow");
+            if (!--in[v]) q.push(v);
+        }
+        viz::show("ordem", order);
+    }
+    viz::print(order.size() == n ? "DAG: ordem valida" : "Ciclo detectado");
+}`,
+  },
+  {
+    id: 'scc-kosaraju',
+    name: 'Kosaraju: componentes fortemente conexas',
+    stdin: `6 7
+1 2
+2 3
+3 1
+3 4
+4 5
+5 4
+5 6
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+int main() {
+    int n, m;
+    cin >> n >> m;
+    vector<vector<int>> g(n + 1), rg(n + 1);
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
+    for (int i = 0; i < m; i++) {
+        int u, v;
+        cin >> u >> v;
+        viz::add_edge(u, v);
+        g[u].push_back(v);
+        rg[v].push_back(u);
+    }
+
+    vector<int> vis(n + 1), ordem, comp(n + 1, -1);
+    function<void(int)> dfs1 = [&](int u) {
+        vis[u] = 1;
+        for (int v : g[u]) if (!vis[v]) dfs1(v);
+        ordem.push_back(u);
+    };
+    function<void(int, int)> dfs2 = [&](int u, int c) {
+        comp[u] = c;
+        viz::set_color(u, c % 2 ? "orange" : "emerald");
+        for (int v : rg[u]) if (comp[v] < 0) dfs2(v, c);
+    };
+    for (int i = 1; i <= n; i++) if (!vis[i]) dfs1(i);
+    reverse(ordem.begin(), ordem.end());
+    int total = 0;
+    for (int u : ordem) if (comp[u] < 0) dfs2(u, total++);
+    viz::print("SCCs: " + to_string(total));
+}`,
+  },
+  {
+    id: 'segment-tree',
+    name: 'Árvore de segmentos: soma',
+    stdin: `6
+2 4 1 7 3 5
+3
+1 3
+2 6
+4 5
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+vector<long long> a,seg;
+void build(int p,int l,int r){if(l==r){seg[p]=a[l];return;}int m=(l+r)/2;build(p*2,l,m);build(p*2+1,m+1,r);seg[p]=seg[p*2]+seg[p*2+1];}
+long long query(int p,int l,int r,int ql,int qr){if(qr<l||r<ql)return 0;if(ql<=l&&r<=qr)return seg[p];int m=(l+r)/2;return query(p*2,l,m,ql,qr)+query(p*2+1,m+1,r,ql,qr);}
+int main() {
+    int n, q;
+    cin >> n;
+    a.assign(n + 1, 0);
+    for (int i = 1; i <= n; i++) {
+        cin >> a[i];
+        viz::add_node(i, to_string(a[i]));
+    }
+    seg.assign(4 * n + 4, 0);
+    build(1, 1, n);
+    cin >> q;
+    while (q--) {
+        int l, r;
+        cin >> l >> r;
+        for (int i = l; i <= r; i++) viz::set_color(i, "emerald");
+        viz::print("Soma: " + to_string(query(1, 1, n, l, r)));
+    }
+}
+`,
+  },
+  {
+    id: 'knapsack',
+    name: 'Programação dinâmica: mochila 0/1',
+    stdin: `4 7
+1 1
+3 4
+4 5
+5 7
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+int main() {
+    int n, W;
+    cin >> n >> W;
+    vector<int> w(n), v(n);
+    for (int i = 0; i < n; i++) {
+        cin >> w[i] >> v[i];
+        viz::add_node(i + 1, "item " + to_string(i + 1));
+    }
+    vector<int> dp(W + 1);
+    for (int i = 0; i < n; i++) {
+        for (int cap = W; cap >= w[i]; cap--) {
+            dp[cap] = max(dp[cap], dp[cap - w[i]] + v[i]);
+        }
+        viz::set_color(i + 1, "emerald");
+        viz::show("dp", dp);
+    }
+    viz::print("Valor maximo: " + to_string(dp[W]));
+}
+`,
+  },
+  {
+    id: 'sieve',
+    name: 'Crivo de Eratóstenes',
+    stdin: `30
+`,
+    code: `#include <bits/stdc++.h>
+#include "visualizer.h"
+using namespace std;
+int main() {
+    int n;
+    cin >> n;
+    for (int i = 2; i <= n; i++) viz::add_node(i, to_string(i));
+    vector<bool> prime(n + 1, true);
+    prime[0] = prime[1] = false;
+    for (int p = 2; p * p <= n; p++) {
+        if (!prime[p]) continue;
+        viz::set_color(p, "emerald");
+        for (int x = p * p; x <= n; x += p) {
+            prime[x] = false;
+            viz::set_color(x, "red");
+        }
+    }
+    vector<int> ans;
+    for (int i = 2; i <= n; i++) if (prime[i]) ans.push_back(i);
+    viz::show("primos", ans);
+    viz::print("Quantidade de primos: " + to_string(ans.size()));
+}
+`,
+  },
 ];
+
+const techniqueComments: Record<string, string> = {
+  'binary-search': 'Busca binaria em vetor ordenado. Entrada: n, vetor, alvo.',
+  'prefix-sum': 'Soma prefixada para consultas em intervalos. Entrada: n, vetor, consultas.',
+  'two-pointers': 'Dois ponteiros em vetor ordenado. Entrada: n, alvo e vetor.',
+  dsu: 'DSU/Union-Find para componentes dinamicas. Entrada: n, m e arestas.',
+  'bfs-shortest-path': 'BFS para menor caminho nao ponderado. Entrada: n, m, arestas, origem e destino.',
+  dijkstra: 'Dijkstra para pesos nao negativos. Entrada: n, m, arestas, origem e destino.',
+  kruskal: 'Kruskal para arvore geradora minima. Entrada: n, m e arestas ponderadas.',
+  'topological-sort': 'Kahn para ordenacao topologica. Entrada: n, m e arestas dirigidas.',
+  'scc-kosaraju': 'Kosaraju para componentes fortemente conexas. Entrada: n, m e arestas dirigidas.',
+  'segment-tree': 'Arvore de segmentos para consultas de soma. Entrada: n, vetor e consultas.',
+  knapsack: 'Programacao dinamica para mochila 0/1. Entrada: n, capacidade e itens.',
+  sieve: 'Crivo de Eratostenes. Entrada: limite superior n.',
+};
+
+const visualizerMethods = `\
+// Metodos de visualizacao disponiveis:
+// viz::set_directed(bool), viz::set_weighted(bool), viz::set_multigraph(bool)
+// viz::add_node(id, label), viz::add_edge(u, v, peso)
+// viz::remove_node(id), viz::remove_edge(u, v), viz::set_weight(u, v, peso)
+// viz::highlight(id, cor), viz::highlight_edge(u, v, cor), viz::highlight_path(caminho, cor)
+// viz::set_color(id, cor), viz::reset_colors(), viz::set_label(id, texto)
+// viz::set_badge(id, texto), viz::set_edge_style(u, v, estilo), viz::set_edge_label(u, v, texto)
+// viz::step(mensagem), viz::show(nome, valores), viz::show_matrix(nome, matriz), viz::print(mensagem)
+`;
+
+export const examples: Example[] = baseExamples.map((example) => ({
+  ...example,
+  code: `${visualizerMethods}// Tecnica: ${techniqueComments[example.id] ?? 'Resolva o problema usando stdin.'}
+// Edite este template e execute com a entrada exibida acima.
+
+${example.code}`,
+}));

@@ -3,8 +3,10 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { GraphNode, GraphEdge } from '@/types/visualizer';
+import { findBipartitePartitions, findHierarchicalLevels } from '@/lib/graphLayout';
+import { planarLayout } from '@/lib/advancedGraph';
 
-export type GraphLayout = 'force' | 'circular' | 'grid';
+export type GraphLayout = 'force' | 'circular' | 'grid' | 'bipartite' | 'hierarchical' | 'planar';
 
 type SimulatedNode = GraphNode & {
   x?: number;
@@ -15,6 +17,8 @@ type SimulatedEdge = Omit<GraphEdge, 'source' | 'target'> & {
   source: number | SimulatedNode;
   target: number | SimulatedNode;
   bend?: number;
+  loopIndex?: number;
+  loopCount?: number;
 };
 
 type DragEvent = d3.D3DragEvent<SVGGElement, SimulatedNode, SimulatedNode>;
@@ -58,10 +62,18 @@ const nodeIdOf = (node: number | SimulatedNode) => (typeof node === 'number' ? n
 const edgeGeometry = (edge: SimulatedEdge, directed: boolean) => {
   if (nodeIdOf(edge.source) === nodeIdOf(edge.target)) {
     const p = nodePosition(edge.source);
+    const loopCount = edge.loopCount ?? 1;
+    const loopIndex = edge.loopIndex ?? 0;
+    const angle = ((loopIndex - (loopCount - 1) / 2) * Math.PI) / 7;
+    const radius = 42 + Math.abs(loopIndex - (loopCount - 1) / 2) * 8;
+    const startX = p.x - 12 + Math.sin(angle) * 8;
+    const endX = p.x + 12 + Math.sin(angle) * 8;
+    const controlY = p.y - radius;
+    const controlOffset = 30 + Math.abs(loopIndex - (loopCount - 1) / 2) * 10;
     return {
-      path: `M${p.x - 12},${p.y - 18}C${p.x - 42},${p.y - 70} ${p.x + 42},${p.y - 70} ${p.x + 12},${p.y - 18}`,
-      lx: p.x,
-      ly: p.y - 62,
+      path: `M${startX},${p.y - 18}C${p.x - controlOffset},${controlY} ${p.x + controlOffset},${controlY} ${endX},${p.y - 18}`,
+      lx: p.x + Math.sin(angle) * 12,
+      ly: controlY - 8,
     };
   }
 
@@ -104,6 +116,13 @@ interface GraphCanvasProps {
   directed?: boolean;
   weighted?: boolean;
   layout?: GraphLayout;
+  bridgeEdgeIndexes?: number[];
+  articulationNodeIds?: number[];
+  stronglyConnectedComponentByNode?: Record<number, number>;
+  coloringByNode?: Record<number, number>;
+  negativeCycleEdgeIndexes?: number[];
+  minCutEdgeIndexes?: number[];
+  minCutSide?: number[];
 }
 
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({
@@ -112,6 +131,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   directed = true,
   weighted = true,
   layout = 'force',
+  bridgeEdgeIndexes = [],
+  articulationNodeIds = [],
+  stronglyConnectedComponentByNode = {},
+  coloringByNode = {},
+  negativeCycleEdgeIndexes = [],
+  minCutEdgeIndexes = [],
+  minCutSide = [],
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -177,7 +203,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             n.x = count === 1 ? width / 2 : width / 2 + radius * Math.cos(angle);
             n.y = count === 1 ? height / 2 : height / 2 + radius * Math.sin(angle);
           });
-        } else {
+        } else if (layout === 'grid') {
           const cols = Math.ceil(Math.sqrt(count));
           const rows = Math.ceil(count / cols);
           const cellW = (width - 2 * margin) / cols;
@@ -186,11 +212,73 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             n.x = margin + cellW * ((i % cols) + 0.5);
             n.y = margin + cellH * (Math.floor(i / cols) + 0.5);
           });
+        } else if (layout === 'planar') {
+          const embedding = planarLayout(
+            nodesCopy.map((node) => node.id),
+            edges.map((edge) => ({
+              source: typeof edge.source === 'number' ? edge.source : edge.source.id,
+              target: typeof edge.target === 'number' ? edge.target : edge.target.id,
+            })),
+          );
+          nodesCopy.forEach((node) => {
+            const target = embedding?.get(node.id);
+            node.x = target ? margin + target.x * (width - 2 * margin) : width / 2;
+            node.y = target ? margin + target.y * (height - 2 * margin) : height / 2;
+          });
+        } else if (layout === 'bipartite') {
+          const { partitions, isBipartite } = findBipartitePartitions(nodesCopy, edges);
+          if (!isBipartite) {
+            nodesCopy.forEach((node, index) => {
+              const columns = 2;
+              const column = index % columns;
+              const row = Math.floor(index / columns);
+              node.x = margin + ((width - 2 * margin) * (column + 0.5)) / columns;
+              node.y = margin + ((height - 2 * margin) * (row + 0.5)) / Math.ceil(count / columns);
+            });
+          } else {
+            const left = nodesCopy.filter((node) => partitions.get(node.id) === 0);
+            const right = nodesCopy.filter((node) => partitions.get(node.id) === 1);
+            const columns = [left, right];
+            columns.forEach((column, columnIndex) => {
+              const rowHeight = (height - 2 * margin) / Math.max(1, column.length);
+              column.forEach((node, rowIndex) => {
+                node.x = margin + ((width - 2 * margin) * (columnIndex + 0.5)) / 2;
+                node.y = margin + rowHeight * (rowIndex + 0.5);
+              });
+            });
+          }
+        } else {
+          const levels = findHierarchicalLevels(nodesCopy, edges, directed);
+          const levelGroups = new Map<number, SimulatedNode[]>();
+          nodesCopy.forEach((node) => {
+            const level = levels.get(node.id) ?? 0;
+            const group = levelGroups.get(level) ?? [];
+            group.push(node);
+            levelGroups.set(level, group);
+          });
+          const maxLevel = Math.max(...levelGroups.keys(), 0);
+          levelGroups.forEach((group, level) => {
+            const rowWidth = (width - 2 * margin) / Math.max(1, group.length);
+            group.forEach((node, index) => {
+              node.x = margin + rowWidth * (index + 0.5);
+              node.y = margin + ((height - 2 * margin) * (level + 0.5)) / (maxLevel + 1);
+            });
+          });
         }
 
         nodesCopy.forEach((n) => {
           n.fx = n.x;
           n.fy = n.y;
+        });
+      }
+
+      if (layout !== 'force') {
+        nodesCopy.forEach((node) => {
+          const start = initialPositions.get(node.id);
+          if (start) {
+            node.x = start.x;
+            node.y = start.y;
+          }
         });
       }
 
@@ -207,7 +295,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         .filter((edge) => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId));
 
       const groups = new Map<string, number[]>();
+      const loops = new Map<number, number[]>();
       validEdges.forEach((edge, index) => {
+        if (edge.sourceId === edge.targetId) {
+          const list = loops.get(edge.sourceId) ?? [];
+          list.push(index);
+          loops.set(edge.sourceId, list);
+          return;
+        }
         const key = `${Math.min(edge.sourceId, edge.targetId)}-${Math.max(edge.sourceId, edge.targetId)}`;
         const list = groups.get(key) ?? [];
         list.push(index);
@@ -215,6 +310,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       });
 
       const bends: number[] = new Array<number>(validEdges.length).fill(0);
+      const loopIndexes = new Map<number, { index: number; count: number }>();
+      loops.forEach((indexes) => {
+        indexes.forEach((edgeIndex, index) => {
+          loopIndexes.set(edgeIndex, { index, count: indexes.length });
+        });
+      });
       groups.forEach((indexes) => {
         if (indexes.length < 2) return;
         indexes.forEach((edgeIndex, position) => {
@@ -234,6 +335,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         style: edge.style,
         label: edge.label,
         bend: bends[index],
+        loopIndex: loopIndexes.get(index)?.index,
+        loopCount: loopIndexes.get(index)?.count,
       }));
 
       const defs = svg.append('defs');
@@ -296,7 +399,22 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         .join('path')
         .attr('fill', 'none')
         .attr('stroke', (d: SimulatedEdge) => resolveColor(d.color, '#64748b'))
-        .attr('stroke-width', (d: SimulatedEdge) => (d.highlighted ? 4 : 2))
+        .attr('stroke-width', (d: SimulatedEdge, index: number) =>
+          d.highlighted || negativeCycleEdgeIndexes.includes(index)
+            ? 4
+            : minCutEdgeIndexes.includes(index)
+              ? 5
+            : bridgeEdgeIndexes.includes(index)
+              ? 4
+              : 2
+        )
+        .attr('stroke', (d: SimulatedEdge, index: number) =>
+          negativeCycleEdgeIndexes.includes(index)
+            ? '#ef4444'
+            : minCutEdgeIndexes.includes(index)
+              ? '#f59e0b'
+            : resolveColor(d.color, '#64748b')
+        )
         .attr('stroke-dasharray', (d: SimulatedEdge) =>
           d.style === 'dashed' ? '8 5' : d.style === 'dotted' ? '2 4' : null
         )
@@ -319,6 +437,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         .data(edgesCopy)
         .join('text')
         .text((d: SimulatedEdge) =>
+          nodes.length > 80 || edges.length > 240 ? '' :
           d.label !== undefined && d.label !== ''
             ? d.label
             : weighted && d.weight !== undefined
@@ -327,7 +446,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         )
         .attr('fill', '#94a3b8')
         .attr('font-size', '11px')
-        .attr('text-anchor', 'middle');
+        .attr('text-anchor', 'middle')
+        .attr('paint-order', 'stroke')
+        .attr('stroke', '#020617')
+        .attr('stroke-width', 4)
+        .attr('stroke-linejoin', 'round');
 
       const node = root
         .append('g')
@@ -338,9 +461,25 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       node
         .append('circle')
         .attr('r', NODE_RADIUS)
-        .attr('fill', (d: SimulatedNode) => resolveColor(d.color, '#3b82f6'))
-        .attr('stroke', (d: SimulatedNode) => (d.highlighted ? '#ffffff' : '#1e293b'))
-        .attr('stroke-width', (d: SimulatedNode) => (d.highlighted ? 3 : 2));
+        .attr('fill', (d: SimulatedNode) => {
+          if (minCutSide.length > 0) return minCutSide.includes(d.id) ? '#38bdf8' : '#f97316';
+          if (d.color && d.color !== '#3b82f6') return resolveColor(d.color);
+          const color = coloringByNode[d.id];
+          const colors = ['#3b82f6', '#10b981', '#f97316', '#a855f7', '#eab308', '#ec4899'];
+          return colors[(color ?? 0) % colors.length];
+        })
+        .attr('stroke', (d: SimulatedNode) => {
+          if (d.highlighted || articulationNodeIds.includes(d.id)) return '#ffffff';
+          const component = stronglyConnectedComponentByNode[d.id];
+          if (component !== undefined) {
+            const colors = ['#f97316', '#22c55e', '#a855f7', '#06b6d4', '#eab308'];
+            return colors[component % colors.length];
+          }
+          return '#1e293b';
+        })
+        .attr('stroke-width', (d: SimulatedNode) =>
+          d.highlighted || articulationNodeIds.includes(d.id) ? 3 : stronglyConnectedComponentByNode[d.id] !== undefined ? 3 : 2
+        );
 
       node
         .append('text')
@@ -455,7 +594,20 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       simulation?.stop();
       layoutTimer?.stop();
     };
-  }, [nodes, edges, directed, weighted, layout]);
+  }, [
+    nodes,
+    edges,
+    directed,
+    weighted,
+    layout,
+    bridgeEdgeIndexes,
+    articulationNodeIds,
+    stronglyConnectedComponentByNode,
+    coloringByNode,
+    negativeCycleEdgeIndexes,
+    minCutEdgeIndexes,
+    minCutSide,
+  ]);
 
   return (
     <div

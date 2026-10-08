@@ -31,6 +31,9 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       <option value="force">Forças</option>
       <option value="circular">Circular</option>
       <option value="grid">Grade</option>
+      <option value="bipartite">Bipartido</option>
+      <option value="hierarchical">Hierárquico</option>
+      <option value="planar">Planar</option>
     </select>
     <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph}>
       <Download className="h-3 w-3" /> SVG
