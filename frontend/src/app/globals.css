@@ -922,3 +922,33 @@ button:disabled { cursor: not-allowed; }
 .toolbar-button-recording { color: #fca5a5; border-color: rgba(239, 68, 68, .5); }
 
 .visualizer-recording .timeline-controls { pointer-events: none; opacity: .6; }
+
+.code-editor-wrap { display: contents; }
+
+@media (max-width: 900px) {
+  .editor-column { min-height: 0; }
+
+  .code-editor-wrap {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    min-height: 0;
+    height: clamp(380px, 68dvh, 560px);
+  }
+  .code-editor-wrap > * { flex: 1 1 0; min-height: 0; }
+
+  .example-controls {
+    order: 4;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    margin-left: 0;
+    gap: 8px;
+  }
+  .example-search { flex: 1 1 100%; width: 100%; height: 40px; font-size: 12px; }
+  .example-controls .example-select { flex: 1 1 0; min-width: 0; }
+  .example-info { flex-wrap: wrap; }
+  .example-info button { min-height: 40px; }
+
+  .visualizer-column:not(.visualizer-fullscreen) .recording-area { flex: 0 0 auto; }
+  .visualizer-column:not(.visualizer-fullscreen) .recording-area > .graph-stage { flex: none; }
+}
