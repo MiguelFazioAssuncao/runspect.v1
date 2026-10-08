@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Runspect frontend
 
-## Getting Started
+Frontend Next.js do Runspect. O backend Go precisa estar rodando separadamente
+porque compila e executa C++17 com `g++` e sandbox do sistema operacional.
 
-First, run the development server:
+## Desenvolvimento local
+
+Inicie o backend em um terminal:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd ../backend
+go run ./cmd/server
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Em outro terminal, inicie o frontend:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Abra `http://localhost:3000`. Sem configuração adicional, o rewrite de
+[`next.config.ts`](./next.config.ts) encaminha `/api/*` para
+`http://127.0.0.1:8080`.
 
-## Learn More
+## Deploy do frontend na Vercel
 
-To learn more about Next.js, take a look at the following resources:
+1. Publique este repositório no GitHub (se ainda não estiver publicado).
+2. Em [vercel.com/new](https://vercel.com/new), importe o repositório.
+3. Em **Root Directory**, selecione `frontend`.
+4. Mantenha o build padrão do Next.js (`npm run build`).
+5. Adicione a variável de ambiente `RUNSPECT_API_URL` com a URL pública do
+   backend, por exemplo `https://api.exemplo.com`, nos ambientes **Preview** e
+   **Production**.
+6. Faça o deploy e teste o botão de execução.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`RUNSPECT_API_URL` é usada pelo rewrite do Next.js; não inclua `/api` no valor,
+pois o caminho `/api/:path*` é acrescentado automaticamente.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Deploy gratuito do backend no Render
 
-## Deploy on Vercel
+O projeto já inclui [`backend/Dockerfile`](../backend/Dockerfile). No
+[Render](https://dashboard.render.com/), crie um **New Web Service**, conecte
+o mesmo repositório e configure:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Root Directory:** `backend`
+- **Runtime:** `Docker`
+- **Instance Type:** `Free`
+- **Health Check Path:** `/healthz`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Adicione estas variáveis no Render:
+
+```bash
+RUNSPECT_ALLOWED_ORIGINS=https://seu-projeto.vercel.app
+```
+
+O backend detecta automaticamente a variável `PORT` fornecida pelo Render.
+Depois do primeiro deploy, copie a URL `https://...onrender.com` para a
+variável `RUNSPECT_API_URL` na Vercel e faça um novo deploy.
+
+O plano gratuito pode suspender o serviço após inatividade; a primeira
+execução depois disso pode demorar aproximadamente um minuto. Para uma
+demonstração entre amigos, isso costuma ser aceitável. Não defina
+`RUNSPECT_SANDBOX=off`: o backend compila e executa código enviado por
+qualquer visitante.
+
+Consulte a [documentação do Next.js sobre deploy](https://nextjs.org/docs/app/building-your-application/deploying)
+para detalhes adicionais.
