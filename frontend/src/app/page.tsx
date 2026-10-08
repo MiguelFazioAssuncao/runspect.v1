@@ -694,19 +694,21 @@ export default function Home() {
               {conversionNotice && <span className="conversion-notice" role="status">{conversionNotice}</span>}
             </div>
           )}
-          <CodeEditor
-            code={code}
-            setCode={(nextCode) => {
-              setCode(nextCode);
-              if (editorTab === 'custom') setCustomCode(nextCode);
-            }}
-            onRun={() => void runCode()}
-            isLoading={isLoading}
-            output={output}
-            hasError={hasError}
-            logs={player.logs}
-            activeLine={player.line}
-          />
+          <div className="code-editor-wrap">
+            <CodeEditor
+              code={code}
+              setCode={(nextCode) => {
+                setCode(nextCode);
+                if (editorTab === 'custom') setCustomCode(nextCode);
+              }}
+              onRun={() => void runCode()}
+              isLoading={isLoading}
+              output={output}
+              hasError={hasError}
+              logs={player.logs}
+              activeLine={player.line}
+            />
+          </div>
           <details className="stdin-panel">
             <summary>entrada (stdin)</summary>
             <textarea
