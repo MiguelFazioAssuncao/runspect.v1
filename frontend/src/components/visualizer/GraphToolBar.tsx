@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Download } from 'lucide-react';
+import { Download, Maximize2, Minimize2, Scan, Square, Video, ZoomIn, ZoomOut } from 'lucide-react';
 import type { GraphLayout } from './GraphCanvas';
 
 interface GraphToolbarProps {
@@ -11,6 +11,15 @@ interface GraphToolbarProps {
   onExportJson: () => void;
   hasGraph: boolean;
   hasSteps: boolean;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFit: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  canRecord: boolean;
+  isRecording: boolean;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
 }
 
 export const GraphToolbar: React.FC<GraphToolbarProps> = ({
@@ -20,6 +29,15 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onExportJson,
   hasGraph,
   hasSteps,
+  onZoomIn,
+  onZoomOut,
+  onFit,
+  isFullscreen,
+  onToggleFullscreen,
+  canRecord,
+  isRecording,
+  onStartRecording,
+  onStopRecording,
 }) => (
   <div className="graph-toolbar">
     <select
@@ -35,11 +53,42 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       <option value="hierarchical">Hierárquico</option>
       <option value="planar">Planar</option>
     </select>
-    <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph}>
+
+    <button className="toolbar-button" onClick={onZoomOut} disabled={!hasGraph} title="Diminuir zoom" aria-label="Diminuir zoom" type="button">
+      <ZoomOut className="h-3 w-3" />
+    </button>
+    <button className="toolbar-button" onClick={onZoomIn} disabled={!hasGraph} title="Aumentar zoom" aria-label="Aumentar zoom" type="button">
+      <ZoomIn className="h-3 w-3" />
+    </button>
+    <button className="toolbar-button" onClick={onFit} disabled={!hasGraph} title="Ajustar à tela" aria-label="Ajustar à tela" type="button">
+      <Scan className="h-3 w-3" />
+    </button>
+
+    <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph} type="button">
       <Download className="h-3 w-3" /> SVG
     </button>
-    <button className="toolbar-button" onClick={onExportJson} disabled={!hasSteps}>
+    <button className="toolbar-button" onClick={onExportJson} disabled={!hasSteps} type="button">
       <Download className="h-3 w-3" /> JSON
+    </button>
+
+    {isRecording ? (
+      <button className="toolbar-button toolbar-button-recording" onClick={onStopRecording} title="Parar gravação" type="button">
+        <Square className="h-3 w-3" /> Parar
+      </button>
+    ) : (
+      <button className="toolbar-button" onClick={onStartRecording} disabled={!canRecord} title="Gravar visualização" type="button">
+        <Video className="h-3 w-3" /> Gravar
+      </button>
+    )}
+
+    <button
+      className="toolbar-button"
+      onClick={onToggleFullscreen}
+      title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'}
+      aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+      type="button"
+    >
+      {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
     </button>
   </div>
 );

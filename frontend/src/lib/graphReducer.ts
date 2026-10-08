@@ -5,6 +5,23 @@ export interface GraphState {
   edges: GraphEdge[];
 }
 
+const NODE_STATE_COLORS = new Map<string, string>([
+  ['queued', 'yellow'],
+  ['visiting', 'orange'],
+  ['done', 'emerald'],
+]);
+
+const EDGE_STATE_COLORS = new Map<string, string>([
+  ['candidate', 'yellow'],
+  ['accepted', 'emerald'],
+  ['rejected', 'red'],
+  ['relaxed', 'yellow'],
+  ['tree', 'emerald'],
+  ['removed', 'gray'],
+]);
+
+const COMPONENT_COLORS = ['emerald', 'orange', 'purple', 'sky', 'yellow', 'pink'];
+
 export const isDirected = (steps: TraceStep[]): boolean =>
   !steps.some((s) => s.step_event === 'SET_DIRECTED' && s.data?.directed === false);
 
@@ -17,7 +34,7 @@ export const isMulti = (steps: TraceStep[]): boolean =>
 export const frameEnds = (steps: TraceStep[]): number[] => {
   const ends: number[] = [];
   steps.forEach((s, i) => {
-    if (s.step_event === 'STEP') ends.push(i);
+    if (s.step_event === 'STEP' || s.step_event === 'VECTOR_STEP') ends.push(i);
   });
   if (ends.length === 0) return steps.map((_, i) => i);
   if (ends[ends.length - 1] !== steps.length - 1) ends.push(steps.length - 1);
@@ -28,6 +45,9 @@ export const frameCaption = (steps: TraceStep[], eventIndex: number): string => 
   const s = steps[eventIndex];
   return s?.step_event === 'STEP' && typeof s.data?.caption === 'string' ? s.data.caption : '';
 };
+
+const isNodePath = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'number' && Number.isInteger(item));
 
 export function buildGraphState(
   steps: TraceStep[],
@@ -53,6 +73,28 @@ export function buildGraphState(
       if (!preferFree || !edge.highlighted) return key;
     }
     return first;
+  };
+
+  const paintNode = (id: number, color: string) => {
+    const node = nodesMap.get(id);
+    if (node) nodesMap.set(id, { ...node, color, highlighted: true });
+  };
+
+  const paintEdge = (u: number, v: number, color: string, style?: GraphEdge['style']) => {
+    const key = findKey(u, v, true);
+    const edge = key !== undefined ? edgesMap.get(key) : undefined;
+    if (key !== undefined && edge) {
+      edgesMap.set(key, { ...edge, color, highlighted: true, ...(style ? { style } : {}) });
+    }
+  };
+
+  const resetColors = () => {
+    Array.from(nodesMap.entries()).forEach(([id, node]) => {
+      nodesMap.set(id, { ...node, color: '#3b82f6', highlighted: false });
+    });
+    Array.from(edgesMap.entries()).forEach(([key, edge]) => {
+      edgesMap.set(key, { ...edge, color: '#64748b', highlighted: false });
+    });
   };
 
   for (let i = 0; i <= upTo && i < steps.length; i++) {
@@ -142,13 +184,9 @@ export function buildGraphState(
         }
         break;
       }
-      case 'RESET_COLORS': {
-        Array.from(nodesMap.entries()).forEach(([id, node]) => {
-          nodesMap.set(id, { ...node, color: '#3b82f6', highlighted: false });
-        });
-        Array.from(edgesMap.entries()).forEach(([key, edge]) => {
-          edgesMap.set(key, { ...edge, color: '#64748b', highlighted: false });
-        });
+      case 'RESET_COLORS':
+      case 'GRAPH_RESET': {
+        resetColors();
         break;
       }
       case 'SET_LABEL': {
@@ -194,6 +232,42 @@ export function buildGraphState(
           if (key !== undefined && edge) {
             edgesMap.set(key, { ...edge, label: data.label ?? undefined });
           }
+        }
+        break;
+      }
+      case 'GRAPH_NODE': {
+        const color = typeof data.state === 'string' ? NODE_STATE_COLORS.get(data.state) : undefined;
+        if (data.id !== undefined && color) paintNode(data.id, color);
+        break;
+      }
+      case 'GRAPH_EDGE': {
+        const color = typeof data.state === 'string' ? EDGE_STATE_COLORS.get(data.state) : undefined;
+        if (data.u !== undefined && data.v !== undefined && color) {
+          paintEdge(data.u, data.v, color, data.state === 'removed' ? 'dashed' : undefined);
+        }
+        break;
+      }
+      case 'GRAPH_VALUE': {
+        if (data.id !== undefined && nodesMap.has(data.id)) {
+          const node = nodesMap.get(data.id)!;
+          nodesMap.set(data.id, { ...node, badge: data.text ? String(data.text) : undefined });
+        }
+        break;
+      }
+      case 'GRAPH_COMPONENT': {
+        if (data.id !== undefined && typeof data.component === 'number' && Number.isInteger(data.component)) {
+          const slot = ((data.component % COMPONENT_COLORS.length) + COMPONENT_COLORS.length) % COMPONENT_COLORS.length;
+          paintNode(data.id, COMPONENT_COLORS[slot]);
+        }
+        break;
+      }
+      case 'GRAPH_PATH': {
+        const path = data.path;
+        if (isNodePath(path)) {
+          path.forEach((id, position) => {
+            paintNode(id, 'red');
+            if (position + 1 < path.length) paintEdge(id, path[position + 1], 'red');
+          });
         }
         break;
       }

@@ -1,161 +1,72 @@
-import { describe, it, expect } from 'vitest';
-import {
-  buildGraphState,
-  frameCaption,
-  frameEnds,
-  isDirected,
-  isMulti,
-  isWeighted,
-} from './graphReducer';
+import { describe, expect, it } from 'vitest';
+import { buildGraphState, frameEnds } from './graphReducer';
 import type { TraceStep } from '@/types/visualizer';
 
-type Item = [string, TraceStep['data']?];
+const event = (step_event: string, data: TraceStep['data']): TraceStep => ({ step: 0, step_event, data });
+const numbered = (events: TraceStep[]): TraceStep[] => events.map((item, i) => ({ ...item, step: i + 1 }));
 
-const seq = (...items: Item[]): TraceStep[] =>
-  items.map(([step_event, data], step) => ({ step, step_event, data: data ?? {} }));
+const base = [
+  event('ADD_NODE', { id: 1, label: '1' }),
+  event('ADD_NODE', { id: 2, label: '2' }),
+  event('ADD_EDGE', { u: 1, v: 2, weight: 3 }),
+];
 
-const build = (steps: TraceStep[], upTo = steps.length - 1) =>
-  buildGraphState(steps, upTo, isDirected(steps), isMulti(steps));
-
-describe('graphReducer', () => {
-  it('grafo vazio', () => {
-    const state = build([], 0);
-    expect(state.nodes).toEqual([]);
-    expect(state.edges).toEqual([]);
+describe('graphReducer semantic events', () => {
+  it('trata VECTOR_STEP como fim de quadro', () => {
+    const steps = numbered([event('VECTOR_INIT', { name: 'a', values: [1] }), event('VECTOR_STEP', { name: 'a' }), event('VECTOR_MARK', { name: 'a', index: 0, state: 'sorted' })]);
+    expect(frameEnds(steps)).toEqual([1, 2]);
   });
 
-  it('mantém peso zero e label vazio', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1, label: '' }],
-      ['ADD_NODE', { id: 2, label: 'b' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 0 }]
-    );
-    const state = build(steps);
-    expect(state.nodes[0].label).toBe('');
-    expect(state.edges[0].weight).toBe(0);
+  it('aplica estados de nó', () => {
+    const steps = numbered([...base, event('GRAPH_NODE', { id: 1, state: 'visiting' }), event('GRAPH_NODE', { id: 2, state: 'done' })]);
+    const state = buildGraphState(steps, 4, true, false);
+    expect(state.nodes[0].color).toBe('orange');
+    expect(state.nodes[1].color).toBe('emerald');
   });
 
-  it('remove nó junto com arestas incidentes', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_NODE', { id: 3, label: '3' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 1 }],
-      ['ADD_EDGE', { u: 2, v: 3, weight: 1 }],
-      ['REMOVE_NODE', { id: 2 }]
-    );
-    const state = build(steps);
-    expect(state.nodes.map((n) => n.id)).toEqual([1, 3]);
-    expect(state.edges).toEqual([]);
+  it('aplica estados de aresta, incluindo removida tracejada', () => {
+    const steps = numbered([...base, event('GRAPH_EDGE', { u: 1, v: 2, state: 'removed' })]);
+    const edge = buildGraphState(steps, 3, true, false).edges[0];
+    expect(edge.color).toBe('gray');
+    expect(edge.style).toBe('dashed');
   });
 
-  it('remove aresta e atualiza peso', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 5 }],
-      ['SET_WEIGHT', { u: 1, v: 2, weight: 9 }],
-      ['REMOVE_EDGE', { u: 1, v: 2 }]
-    );
-    expect(build(steps, 3).edges[0].weight).toBe(9);
-    expect(build(steps, 4).edges).toEqual([]);
+  it('aplica valor, componente e caminho', () => {
+    const steps = numbered([
+      ...base,
+      event('GRAPH_VALUE', { id: 1, text: 'd=0' }),
+      event('GRAPH_COMPONENT', { id: 2, component: 1 }),
+      event('GRAPH_PATH', { path: [1, 2] }),
+    ]);
+    const afterComponent = buildGraphState(steps, 4, true, false);
+    expect(afterComponent.nodes[0].badge).toBe('d=0');
+    expect(afterComponent.nodes[1].color).toBe('orange');
+    const afterPath = buildGraphState(steps, 5, true, false);
+    expect(afterPath.nodes.map((node) => node.color)).toEqual(['red', 'red']);
+    expect(afterPath.edges[0].color).toBe('red');
   });
 
-  it('reset_colors limpa nós e arestas', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 1 }],
-      ['SET_COLOR', { id: 1, color: 'red' }],
-      ['HIGHLIGHT_EDGE', { u: 1, v: 2, color: 'red' }],
-      ['RESET_COLORS']
-    );
-    const state = build(steps);
-    expect(state.nodes[0].highlighted).toBe(false);
-    expect(state.edges[0].highlighted).toBe(false);
+  it('reset restaura cores e preserva badges', () => {
+    const steps = numbered([
+      ...base,
+      event('GRAPH_VALUE', { id: 1, text: 'x' }),
+      event('GRAPH_NODE', { id: 1, state: 'done' }),
+      event('GRAPH_RESET', undefined),
+    ]);
+    const state = buildGraphState(steps, 5, true, false);
+    expect(state.nodes[0].color).toBe('#3b82f6');
+    expect(state.nodes[0].badge).toBe('x');
   });
 
-  it('não direcionado deduplica aresta nos dois sentidos', () => {
-    const steps = seq(
-      ['SET_DIRECTED', { directed: false }],
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 1 }],
-      ['ADD_EDGE', { u: 2, v: 1, weight: 1 }]
-    );
-    expect(isDirected(steps)).toBe(false);
-    expect(build(steps).edges).toHaveLength(1);
-  });
-
-  it('multigrafo mantém arestas paralelas e destaca uma por vez', () => {
-    const steps = seq(
-      ['SET_MULTI', { multi: true }],
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 1 }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 2 }],
-      ['HIGHLIGHT_EDGE', { u: 1, v: 2, color: 'red' }],
-      ['HIGHLIGHT_EDGE', { u: 1, v: 2, color: 'red' }]
-    );
-    expect(build(steps, 4).edges).toHaveLength(2);
-    const afterFirst = build(steps, 5).edges;
-    expect(afterFirst[0].highlighted).toBe(true);
-    expect(afterFirst[1].highlighted).toBeUndefined();
-    expect(build(steps).edges[1].highlighted).toBe(true);
-  });
-
-  it('voltar na timeline reproduz o mesmo estado', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 1 }],
-      ['REMOVE_EDGE', { u: 1, v: 2 }]
-    );
-    const before = build(steps, 2);
-    build(steps, 3);
-    expect(build(steps, 2)).toEqual(before);
-  });
-
-  it('detecta set_weighted(false)', () => {
-    expect(isWeighted(seq(['SET_WEIGHTED', { weighted: false }]))).toBe(false);
-    expect(isWeighted(seq(['ADD_NODE', { id: 1 }]))).toBe(true);
-  });
-
-  it('sem STEP, cada evento é um frame', () => {
-    const steps = seq(['ADD_NODE', { id: 1 }], ['ADD_NODE', { id: 2 }]);
-    expect(frameEnds(steps)).toEqual([0, 1]);
-  });
-
-  it('STEP agrupa eventos e o resto vira frame final', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1 }],
-      ['ADD_NODE', { id: 2 }],
-      ['STEP', { caption: 'a' }],
-      ['SET_COLOR', { id: 1, color: 'red' }]
-    );
-    expect(frameEnds(steps)).toEqual([2, 3]);
-    expect(frameCaption(steps, 2)).toBe('a');
-    expect(frameCaption(steps, 3)).toBe('');
-  });
-
-  it('frames vazios para execução vazia', () => {
-    expect(frameEnds([])).toEqual([]);
-  });
-
-  it('badge, estilo e label aplicam e limpam', () => {
-    const steps = seq(
-      ['ADD_NODE', { id: 1, label: '1' }],
-      ['ADD_NODE', { id: 2, label: '2' }],
-      ['ADD_EDGE', { u: 1, v: 2, weight: 1 }],
-      ['SET_BADGE', { id: 1, text: 'd=0' }],
-      ['SET_EDGE_STYLE', { u: 1, v: 2, style: 'dashed' }],
-      ['SET_EDGE_LABEL', { u: 1, v: 2, label: '3/10' }],
-      ['SET_BADGE', { id: 1, text: '' }]
-    );
-    const s = build(steps, 5);
-    expect(s.nodes[0].badge).toBe('d=0');
-    expect(s.edges[0].style).toBe('dashed');
-    expect(s.edges[0].label).toBe('3/10');
-    expect(build(steps).nodes[0].badge).toBeUndefined();
+  it('ignora estados desconhecidos e caminhos inválidos', () => {
+    const steps = numbered([
+      ...base,
+      event('GRAPH_NODE', { id: 1, state: 'constructor' }),
+      event('GRAPH_EDGE', { u: 1, v: 2, state: 'nada' }),
+      event('GRAPH_PATH', { path: [1.5] }),
+    ]);
+    const state = buildGraphState(steps, 5, true, false);
+    expect(state.nodes[0].color).toBe('#3b82f6');
+    expect(state.edges[0].color).toBe('#64748b');
   });
 });

@@ -1,5 +1,10 @@
 # Tutorial completo do Runspect
 
+> A referência interativa também está disponível no próprio site: clique em
+> **documentação da API** no rodapé do laboratório para pesquisar os métodos,
+> copiar exemplos para o editor e executá-los no backend. Ela é mantida junto
+> da API usada pelo visualizador.
+
 Este documento explica como o Runspect funciona, como executá-lo e como usar
 todos os métodos criados no projeto. O Runspect é um laboratório para executar
 algoritmos em C++17 e visualizar, passo a passo, grafos, estruturas auxiliares

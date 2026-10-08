@@ -8,6 +8,7 @@ import {
   isMulti,
   isWeighted,
 } from '@/lib/graphReducer';
+import { buildVectorsState } from '@/lib/vectorReducer';
 
 export function useVisualizerPlayer(steps: TraceStep[]) {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
@@ -16,14 +17,11 @@ export function useVisualizerPlayer(steps: TraceStep[]) {
 
   const frames = useMemo(() => frameEnds(steps), [steps]);
   const totalSteps = frames.length;
-  const normalizedStepIndex = totalSteps === 0
-    ? 0
-    : Math.min(currentStepIndex, totalSteps - 1);
+  const normalizedStepIndex = totalSteps === 0 ? 0 : Math.min(currentStepIndex, totalSteps - 1);
   const eventIndex = frames[normalizedStepIndex] ?? 0;
   const eventLine = steps[eventIndex]?.data?.line;
-  const line = typeof eventLine === 'number' && Number.isFinite(eventLine) && eventLine > 0
-    ? eventLine
-    : null;
+  const line =
+    typeof eventLine === 'number' && Number.isFinite(eventLine) && eventLine > 0 ? eventLine : null;
 
   const nextStep = useCallback(() => {
     setCurrentStepIndex((prev) => {
@@ -39,9 +37,12 @@ export function useVisualizerPlayer(steps: TraceStep[]) {
     setCurrentStepIndex((prev) => Math.max(0, prev - 1));
   }, []);
 
-  const seek = useCallback((index: number) => {
-    setCurrentStepIndex(totalSteps === 0 ? 0 : Math.min(Math.max(0, index), totalSteps - 1));
-  }, [totalSteps]);
+  const seek = useCallback(
+    (index: number) => {
+      setCurrentStepIndex(totalSteps === 0 ? 0 : Math.min(Math.max(0, index), totalSteps - 1));
+    },
+    [totalSteps]
+  );
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -72,6 +73,8 @@ export function useVisualizerPlayer(steps: TraceStep[]) {
     () => buildGraphState(steps, eventIndex, directed, multi),
     [steps, eventIndex, directed, multi]
   );
+
+  const vectorState = useMemo(() => buildVectorsState(steps, eventIndex), [steps, eventIndex]);
 
   const caption = useMemo(() => frameCaption(steps, eventIndex), [steps, eventIndex]);
 
@@ -124,6 +127,8 @@ export function useVisualizerPlayer(steps: TraceStep[]) {
     directed,
     weighted,
     multi,
+    vectors: vectorState.vectors,
+    vectorIssues: vectorState.issues,
     logs,
     structs,
     matrices,

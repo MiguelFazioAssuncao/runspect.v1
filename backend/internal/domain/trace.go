@@ -9,6 +9,7 @@ type TraceStep struct {
 type ExecutionResult struct {
 	Success bool        `json:"success"`
 	Steps   []TraceStep `json:"steps"`
+	Output  string      `json:"output,omitempty"`
 	Errors  string      `json:"errors,omitempty"`
 	TimeMs  int64       `json:"time_ms"`
 }
