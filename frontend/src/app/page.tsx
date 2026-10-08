@@ -746,6 +746,7 @@ export default function Home() {
 
         <div
           ref={visualizerRef}
+          data-has-graph={hasGraph}
           className={`visualizer-column ${fullscreen ? 'visualizer-fullscreen' : ''} ${isRecording ? 'visualizer-recording' : ''}`}
         >
           <div className="visualizer-header">
