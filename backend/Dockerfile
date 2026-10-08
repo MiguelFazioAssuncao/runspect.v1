@@ -20,7 +20,7 @@ COPY pkg /app/pkg
 ENV RUNSPECT_ADDR=0.0.0.0:8080
 ENV RUNSPECT_VISUALIZER_HEADER=/app/pkg/visualizer/visualizer.h
 ENV RUNSPECT_ALLOWED_ORIGINS=https://runspect-v1.vercel.app
+ENV RUNSPECT_COMPILE_TIMEOUT_SEC=30
 EXPOSE 8080
 CMD ["/app/runspect"]
-
 
