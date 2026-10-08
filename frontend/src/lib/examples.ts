@@ -182,7 +182,7 @@ int main() {
         vector<vector<string>> t(2);
         for (int i = 1; i <= n; i++) {
             t[0].push_back(to_string(i));
-            t[1].push_back(dist[i] == INF ? "inf" : to_string(dist[i]));
+            t[1].push_back(dist[i] == INF ? "∞" : to_string(dist[i]));
         }
         viz::show_matrix("dist", t);
     };
@@ -502,7 +502,7 @@ int main() {
             t[0][i] = to_string(i);
             t[i][0] = to_string(i);
             for (int j = 1; j <= n; j++) {
-                t[i][j] = d[i][j] >= INF ? "inf" : to_string(d[i][j]);
+                t[i][j] = d[i][j] >= INF ? "∞" : to_string(d[i][j]);
             }
         }
         viz::show_matrix("dist", t);
