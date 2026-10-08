@@ -55,6 +55,18 @@ const waitForPaint = async () => {
 };
 const evenSize = (value: number) => Math.max(2, Math.floor(value / 2) * 2);
 
+type ExampleItem = (typeof examples)[number];
+
+const filterExamples = (query: string, category: string): ExampleItem[] => {
+  const normalizedQuery = query.toLocaleLowerCase();
+  return examples.filter((example) => {
+    const matchesQuery = `${example.name} ${example.description ?? ''} ${(example.tags ?? []).join(' ')}`
+      .toLocaleLowerCase()
+      .includes(normalizedQuery);
+    return matchesQuery && (category === 'todas' || (example.category ?? 'Outros') === category);
+  });
+};
+
 type MuxerCodec = 'avc' | 'vp9' | 'av1';
 
 interface EncoderChoice {
@@ -246,15 +258,29 @@ export default function Home() {
     [],
   );
   const visibleExamples = useMemo(
-    () =>
-      examples.filter((example) => {
-        const matchesQuery = `${example.name} ${example.description ?? ''} ${(example.tags ?? []).join(' ')}`
-          .toLocaleLowerCase()
-          .includes(exampleQuery.toLocaleLowerCase());
-        return matchesQuery && (exampleCategory === 'todas' || (example.category ?? 'Outros') === exampleCategory);
-      }),
+    () => filterExamples(exampleQuery, exampleCategory),
     [exampleCategory, exampleQuery],
   );
+
+  const selectExample = (example: ExampleItem) => {
+    setSelectedExampleId(example.id);
+    setCode(example.code);
+    setStdin(example.stdin ?? '');
+  };
+
+  const changeExampleCategory = (category: string) => {
+    setExampleCategory(category);
+    const matches = filterExamples(exampleQuery, category);
+    if (matches.length > 0) selectExample(matches[0]);
+  };
+
+  const changeExampleQuery = (query: string) => {
+    setExampleQuery(query);
+    const matches = filterExamples(query, exampleCategory);
+    if (matches.length > 0 && !matches.some((example) => example.id === selectedExampleId)) {
+      selectExample(matches[0]);
+    }
+  };
 
   const hasGraph = player.graphState.nodes.length > 0;
   const hasVectors = player.vectors.length > 0;
@@ -633,23 +659,20 @@ export default function Home() {
             </div>
             {editorTab === 'examples' && (
               <div className="example-controls">
-                <input className="example-search" value={exampleQuery} onChange={(e) => setExampleQuery(e.target.value)} placeholder="buscar exemplo..." aria-label="Buscar exemplos" />
-                <select className="example-select" value={exampleCategory} onChange={(e) => setExampleCategory(e.target.value)} aria-label="Filtrar exemplos por categoria">
+                <input className="example-search" value={exampleQuery} onChange={(e) => changeExampleQuery(e.target.value)} placeholder="buscar exemplo..." aria-label="Buscar exemplos" />
+                <select className="example-select" value={exampleCategory} onChange={(e) => changeExampleCategory(e.target.value)} aria-label="Filtrar exemplos por categoria">
                   {categories.map((category) => <option key={category} value={category}>{category}</option>)}
                 </select>
                 <select
                   className="example-select"
-                  value={selectedExampleId}
+                  value={visibleExamples.some((ex) => ex.id === selectedExampleId) ? selectedExampleId : ''}
                   onChange={(e) => {
                     const ex = examples.find((x) => x.id === e.target.value);
-                    if (ex) {
-                      setSelectedExampleId(ex.id);
-                      setCode(ex.code);
-                      setStdin(ex.stdin ?? '');
-                    }
+                    if (ex) selectExample(ex);
                   }}
                   aria-label="Selecionar técnica de programação competitiva"
                 >
+                  {visibleExamples.length === 0 && <option value="">nenhuma técnica encontrada</option>}
                   {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
                 </select>
               </div>
