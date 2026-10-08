@@ -9,31 +9,49 @@ export const examples: Example[] = [
   {
     id: 'inicial',
     name: 'Inicial',
+    stdin: `2 1
+1 2 4
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    viz::add_node(1, "Start");
-    viz::add_node(2, "Explore");
-    viz::add_edge(1, 2, 4);
-    viz::highlight(1, "emerald");
-    viz::highlight(2, "orange");
+    int n, m;
+    cin >> n >> m;
+    for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
+    for (int i = 0; i < m; i++) {
+        int u, v, peso;
+        cin >> u >> v >> peso;
+        viz::add_edge(u, v, peso);
+    }
+    if (n >= 1) viz::highlight(1, "emerald");
+    if (n >= 2) viz::highlight(2, "orange");
 }`,
   },
   {
     id: 'kahn',
     name: 'Ordenação topológica (Kahn)',
+    stdin: `8 9
+1 2
+1 3
+2 4
+3 4
+3 5
+4 6
+5 6
+6 7
+8 5
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 8;
-    vector<pair<int,int>> arestas = {
-        {1,2}, {1,3}, {2,4}, {3,4}, {3,5},
-        {4,6}, {5,6}, {6,7}, {8,5}
-    };
+    int n, m;
+    cin >> n >> m;
+    vector<pair<int,int>> arestas(m);
+    for (auto& [u, v] : arestas) cin >> u >> v;
 
     vector<vector<int>> adj(n + 1);
     vector<int> grau(n + 1, 0);
@@ -94,13 +112,24 @@ int main() {
   {
     id: 'bfs',
     name: 'Busca em largura (BFS)',
+    stdin: `7 6
+1 2
+1 3
+2 4
+2 5
+3 6
+3 7
+1
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 7;
-    vector<pair<int,int>> arestas = {{1,2},{1,3},{2,4},{2,5},{3,6},{3,7}};
+    int n, m;
+    cin >> n >> m;
+    vector<pair<int,int>> arestas(m);
+    for (auto& [u, v] : arestas) cin >> u >> v;
 
     viz::set_directed(false);
     viz::set_weighted(false);
@@ -129,9 +158,11 @@ int main() {
         viz::show_matrix("dist", t);
     };
 
-    dist[1] = 0;
-    q.push(1);
-    viz::set_color(1, "yellow");
+    int origem;
+    cin >> origem;
+    dist[origem] = 0;
+    q.push(origem);
+    viz::set_color(origem, "yellow");
     mostrar();
 
     while (!q.empty()) {
@@ -154,16 +185,29 @@ int main() {
   {
     id: 'dijkstra',
     name: 'Menor caminho (Dijkstra)',
+    stdin: `6 9
+1 2 7
+1 3 9
+1 6 14
+2 3 10
+2 4 15
+3 4 11
+3 6 2
+4 5 6
+6 5 9
+1 5
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 6;
-    vector<array<int,3>> es = {
-        {1,2,7},{1,3,9},{1,6,14},{2,3,10},{2,4,15},
-        {3,4,11},{3,6,2},{4,5,6},{6,5,9}
-    };
+    int n, m;
+    cin >> n >> m;
+    vector<array<int,3>> es(m);
+    for (auto& [u, v, w] : es) cin >> u >> v >> w;
+    int origem, destino;
+    cin >> origem >> destino;
 
     viz::set_directed(true);
     vector<vector<pair<int,int>>> adj(n + 1);
@@ -187,9 +231,9 @@ int main() {
         viz::show_matrix("dist", t);
     };
 
-    dist[1] = 0;
-    pq.push({0, 1});
-    viz::set_color(1, "yellow");
+    dist[origem] = 0;
+    pq.push({0, origem});
+    viz::set_color(origem, "yellow");
     mostrar();
 
     while (!pq.empty()) {
@@ -213,20 +257,30 @@ int main() {
 
     viz::reset_colors();
     vector<int> caminho;
-    for (int x = 5; x; x = pai[x]) caminho.push_back(x);
+    for (int x = destino; x; x = pai[x]) caminho.push_back(x);
     reverse(caminho.begin(), caminho.end());
     viz::highlight_path(caminho, "red");
-    viz::print("Distancia 1 -> 5: " + to_string(dist[5]));
+    viz::print("Distancia " + to_string(origem) + " -> " + to_string(destino) + ": " + to_string(dist[destino]));
 }`,
   },
   {
     id: 'dfs',
     name: 'Busca em profundidade (DFS)',
+    stdin: `8 7
+1 2
+1 3
+2 4
+2 5
+3 6
+5 7
+6 8
+1
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
-int n = 8;
+int n;
 vector<vector<int>> adj;
 vector<int> estado, saida;
 
@@ -246,10 +300,14 @@ void dfs(int u) {
 }
 
 int main() {
+    int m, inicio;
+    cin >> n >> m;
+    vector<pair<int,int>> arestas(m);
+    for (auto& [u, v] : arestas) cin >> u >> v;
+    cin >> inicio;
     viz::set_directed(false);
     viz::set_weighted(false);
 
-    vector<pair<int,int>> arestas = {{1,2},{1,3},{2,4},{2,5},{3,6},{5,7},{6,8}};
     adj.assign(n + 1, {});
     estado.assign(n + 1, 0);
 
@@ -260,22 +318,34 @@ int main() {
         adj[v].push_back(u);
     }
 
-    dfs(1);
+    dfs(inicio);
     viz::print("DFS concluida");
 }`,
   },
   {
     id: 'prim',
     name: 'Árvore geradora mínima (Prim)',
+    stdin: `6 8
+1 2 4
+1 3 3
+2 3 1
+2 4 2
+3 4 4
+4 5 2
+4 6 3
+5 6 6
+1
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 6;
-    vector<array<int,3>> es = {
-        {1,2,4},{1,3,3},{2,3,1},{2,4,2},{3,4,4},{4,5,2},{4,6,3},{5,6,6}
-    };
+    int n, m, inicio;
+    cin >> n >> m;
+    vector<array<int,3>> es(m);
+    for (auto& [u, v, w] : es) cin >> u >> v >> w;
+    cin >> inicio;
 
     viz::set_directed(false);
     vector<vector<pair<int,int>>> adj(n + 1);
@@ -288,7 +358,7 @@ int main() {
 
     vector<bool> dentro(n + 1, false);
     priority_queue<array<int,3>, vector<array<int,3>>, greater<>> pq;
-    pq.push({0, 1, 0});
+    pq.push({0, inicio, 0});
     int total = 0;
 
     while (!pq.empty()) {
@@ -310,6 +380,16 @@ int main() {
   {
     id: 'kruskal',
     name: 'Árvore geradora mínima (Kruskal)',
+    stdin: `6 8
+1 2 4
+1 3 3
+2 3 1
+2 4 2
+3 4 4
+4 5 2
+4 6 3
+5 6 6
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
@@ -328,10 +408,10 @@ struct DSU {
 };
 
 int main() {
-    int n = 6;
-    vector<array<int,3>> es = {
-        {1,2,4},{1,3,3},{2,3,1},{2,4,2},{3,4,4},{4,5,2},{4,6,3},{5,6,6}
-    };
+    int n, m;
+    cin >> n >> m;
+    vector<array<int,3>> es(m);
+    for (auto& [u, v, w] : es) cin >> u >> v >> w;
 
     viz::set_directed(false);
     for (int i = 1; i <= n; i++) viz::add_node(i, to_string(i));
@@ -366,13 +446,23 @@ int main() {
   {
     id: 'componentes',
     name: 'Componentes conexas',
+    stdin: `9 6
+1 2
+2 3
+4 5
+5 6
+6 4
+7 8
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 9;
-    vector<pair<int,int>> arestas = {{1,2},{2,3},{4,5},{5,6},{6,4},{7,8}};
+    int n, m;
+    cin >> n >> m;
+    vector<pair<int,int>> arestas(m);
+    for (auto& [u, v] : arestas) cin >> u >> v;
 
     viz::set_directed(false);
     viz::set_weighted(false);
@@ -420,11 +510,19 @@ int main() {
   {
     id: 'ciclo',
     name: 'Detecção de ciclo (dirigido)',
+    stdin: `6 6
+1 2
+2 3
+3 4
+4 2
+1 5
+5 6
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
-int n = 6;
+int n;
 vector<vector<int>> adj;
 vector<int> estado, pilha;
 
@@ -453,7 +551,10 @@ bool dfs(int u) {
 }
 
 int main() {
-    vector<pair<int,int>> arestas = {{1,2},{2,3},{3,4},{4,2},{1,5},{5,6}};
+    int m;
+    cin >> n >> m;
+    vector<pair<int,int>> arestas(m);
+    for (auto& [u, v] : arestas) cin >> u >> v;
 
     adj.assign(n + 1, {});
     estado.assign(n + 1, 0);
@@ -475,14 +576,22 @@ int main() {
   {
     id: 'floyd',
     name: 'Todos os pares (Floyd-Warshall)',
+    stdin: `4 4
+1 2 5
+1 4 10
+2 3 3
+3 4 1
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 4;
+    int n, m;
+    cin >> n >> m;
     const int INF = 1000000000;
-    vector<array<int,3>> es = {{1,2,5},{1,4,10},{2,3,3},{3,4,1}};
+    vector<array<int,3>> es(m);
+    for (auto& [u, v, w] : es) cin >> u >> v >> w;
 
     viz::set_directed(true);
     vector<vector<int>> d(n + 1, vector<int>(n + 1, INF));
@@ -529,16 +638,28 @@ int main() {
   {
     id: 'fluxo',
     name: 'Fluxo máximo (Edmonds-Karp)',
+    stdin: `6 9
+1 2 10
+1 3 10
+2 3 2
+2 4 4
+2 5 8
+3 5 9
+4 6 10
+5 4 6
+5 6 10
+1 6
+`,
     code: `#include <bits/stdc++.h>
 #include "visualizer.h"
 using namespace std;
 
 int main() {
-    int n = 6, s = 1, t = 6;
-    vector<array<int,3>> es = {
-        {1,2,10},{1,3,10},{2,3,2},{2,4,4},{2,5,8},
-        {3,5,9},{4,6,10},{5,4,6},{5,6,10}
-    };
+    int n, m, s, t;
+    cin >> n >> m;
+    vector<array<int,3>> es(m);
+    for (auto& [u, v, c] : es) cin >> u >> v >> c;
+    cin >> s >> t;
 
     viz::set_directed(true);
     vector<vector<int>> cap(n + 1, vector<int>(n + 1, 0));
@@ -604,8 +725,8 @@ int main() {
 }`,
   },
   {
-    id: 'bfs-stdin',
-    name: 'BFS com entrada (stdin + frames)',
+    id: 'bfs-frames',
+    name: 'BFS (frames)',
     stdin: `6 7
 1 2
 1 3

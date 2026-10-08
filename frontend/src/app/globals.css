@@ -60,6 +60,8 @@ button:disabled { cursor: not-allowed; }
 .topbar-context, .run-state, .workspace-footer { color: #64748b; font-size: 11px; }
 .topbar-context { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: #34d399; box-shadow: 0 0 10px #34d399; }
+.status-dot-checking { background: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+.status-dot-disconnected { background: #f87171; box-shadow: 0 0 10px #f87171; }
 
 .workspace-heading {
   flex: 0 0 auto;

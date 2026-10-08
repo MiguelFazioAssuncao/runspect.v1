@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Activity, CircleHelp, Clock3, Code2, Network } from 'lucide-react';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { GraphCanvas } from '@/components/visualizer/GraphCanvas';
@@ -23,7 +23,36 @@ export default function Home() {
   const [output, setOutput] = useState('Aguardando uma execução...');
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const player = useVisualizerPlayer(steps);
+
+  useEffect(() => {
+    let active = true;
+
+    const checkBackend = async () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 3000);
+
+      try {
+        const response = await fetch('/healthz', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (active) setBackendStatus(response.ok ? 'connected' : 'disconnected');
+      } catch {
+        if (active) setBackendStatus('disconnected');
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    };
+
+    void checkBackend();
+    const interval = window.setInterval(checkBackend, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const runCode = async () => {
     setIsLoading(true);
@@ -63,7 +92,11 @@ export default function Home() {
           <div className="brand-mark"><Network className="h-4 w-4" /></div>
           <div><p className="brand-name">RUNSPECT</p><p className="brand-subtitle">algorithms lab</p></div>
         </div>
-        <div className="topbar-context"><span className="status-dot" /> backend conectado <span className="text-slate-700">•</span> C++17</div>
+        <div className="topbar-context">
+          <span className={`status-dot status-dot-${backendStatus}`} />
+          backend {backendStatus === 'connected' ? 'conectado' : backendStatus === 'checking' ? 'verificando...' : 'desconectado'}
+          <span className="text-slate-700">•</span> C++17
+        </div>
       </header>
 
       <section className="workspace-heading">

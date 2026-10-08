@@ -129,6 +129,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     }
 
     let simulation: d3.Simulation<SimulatedNode, undefined> | undefined;
+    let layoutTimer: d3.Timer | undefined;
 
     const render = () => {
       if (!containerRef.current || !svgRef.current) return;
@@ -155,6 +156,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           y: startY,
         };
       });
+      const initialPositions = new Map(
+        nodesCopy.map((node) => [node.id, { x: node.x ?? width / 2, y: node.y ?? height / 2 }]),
+      );
 
       const nodeIds = new Set(nodesCopy.map((node) => node.id));
 
@@ -187,7 +191,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         nodesCopy.forEach((n) => {
           n.fx = n.x;
           n.fy = n.y;
-          positionsRef.current.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
         });
       }
 
@@ -394,6 +397,29 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         node.attr('transform', (d: SimulatedNode) => `translate(${d.x ?? 0},${d.y ?? 0})`);
       };
 
+      if (layout !== 'force') {
+        const startPositions = nodesCopy.map((node) => ({
+          node,
+          x: initialPositions.get(node.id)?.x ?? width / 2,
+          y: initialPositions.get(node.id)?.y ?? height / 2,
+          targetX: node.x ?? width / 2,
+          targetY: node.y ?? height / 2,
+        }));
+        const duration = 650;
+        simulation.stop();
+        layoutTimer = d3.timer((elapsed) => {
+          const progress = Math.min(1, elapsed / duration);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          startPositions.forEach(({ node, x, y, targetX, targetY }) => {
+            node.x = x + (targetX - x) * eased;
+            node.y = y + (targetY - y) * eased;
+            positionsRef.current.set(node.id, { x: node.x, y: node.y });
+          });
+          updatePositions();
+          if (progress === 1) layoutTimer?.stop();
+        });
+      }
+
       simulation.on('tick', () => {
         nodesCopy.forEach((currentNode) => {
           currentNode.x = Math.max(
@@ -427,6 +453,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     return () => {
       resizeObserver.disconnect();
       simulation?.stop();
+      layoutTimer?.stop();
     };
   }, [nodes, edges, directed, weighted, layout]);
 
