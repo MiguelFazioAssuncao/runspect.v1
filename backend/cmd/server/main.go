@@ -41,6 +41,16 @@ func envInt(key string, fallback int) int {
 	return fallback
 }
 
+func serverAddress() string {
+	if address := os.Getenv("RUNSPECT_ADDR"); address != "" {
+		return address
+	}
+	if port := os.Getenv("PORT"); port != "" {
+		return "0.0.0.0:" + port
+	}
+	return "127.0.0.1:8080"
+}
+
 func resolveHeaderPath() string {
 	headerPath := os.Getenv("RUNSPECT_VISUALIZER_HEADER")
 	if headerPath == "" {
@@ -101,6 +111,9 @@ func main() {
 	cppRunner.StackBytes = uint64(envInt("RUNSPECT_STACK_MB", int(cppRunner.StackBytes>>20))) << 20
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/api/run", runHandler(cppRunner))
 
 	origins := strings.Split(
@@ -118,7 +131,7 @@ func main() {
 	)
 
 	server := &http.Server{
-		Addr:              envString("RUNSPECT_ADDR", "127.0.0.1:8080"),
+		Addr:              serverAddress(),
 		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
