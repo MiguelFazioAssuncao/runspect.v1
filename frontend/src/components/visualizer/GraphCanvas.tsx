@@ -19,6 +19,8 @@ type SimulatedEdge = Omit<GraphEdge, 'source' | 'target'> & {
 
 type DragEvent = d3.D3DragEvent<SVGGElement, SimulatedNode, SimulatedNode>;
 
+const COMPACT_QUERY = '(max-width: 900px), (pointer: coarse)';
+
 const COLOR_MAP: Record<string, string> = {
   emerald: '#10b981',
   green: '#22c55e',
@@ -135,6 +137,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
       if (width < 50 || height < 50) return;
 
+      const interactive = !window.matchMedia(COMPACT_QUERY).matches;
+
       const layoutChanged = layoutRef.current !== layout;
       layoutRef.current = layout;
 
@@ -246,17 +250,22 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           .attr('fill', c);
       });
 
-      const root = svg.append('g').attr('transform', transformRef.current.toString());
+      const initialTransform = interactive ? transformRef.current : d3.zoomIdentity;
+      const root = svg.append('g').attr('transform', initialTransform.toString());
 
-      svg.call(
-        d3
-          .zoom<SVGSVGElement, unknown>()
-          .scaleExtent([0.3, 4])
-          .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
-            transformRef.current = event.transform;
-            root.attr('transform', event.transform.toString());
-          })
-      );
+      if (interactive) {
+        svg.call(
+          d3
+            .zoom<SVGSVGElement, unknown>()
+            .scaleExtent([0.3, 4])
+            .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+              transformRef.current = event.transform;
+              root.attr('transform', event.transform.toString());
+            })
+        );
+      } else {
+        svg.on('.zoom', null).style('touch-action', 'pan-y');
+      }
 
       simulation?.stop();
       simulation = d3
@@ -354,7 +363,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
       node.append('title').text((d: SimulatedNode) => `id ${d.id} · ${d.label}`);
 
-      if (layout === 'force') {
+      if (layout === 'force' && interactive) {
         const dragBehavior = d3
           .drag<SVGGElement, SimulatedNode>()
           .on('start', (_event: DragEvent, d: SimulatedNode) => {
@@ -424,6 +433,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   return (
     <div
       ref={containerRef}
+      className="graph-canvas"
       style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#020617' }}
     >
       <svg ref={svgRef} style={{ display: 'block', width: '100%', height: '100%' }} />

@@ -99,7 +99,7 @@ export default function Home() {
             output={output}
             hasError={hasError}
             logs={player.logs}
-            activeLine={isLoading ? null : player.line}
+            activeLine={player.line}
           />
           <details className="stdin-panel">
             <summary>entrada (stdin)</summary>
@@ -125,25 +125,26 @@ export default function Home() {
               hasSteps={steps.length > 0}
             />
           </div>
-          <div className="graph-panel">
-            <GraphCanvas
-              key={runId}
-              nodes={player.graphState.nodes}
-              edges={player.graphState.edges}
-              directed={player.directed}
-              weighted={player.weighted}
-              layout={layout}
-            />
-            {player.caption && <div className="frame-caption" role="status">{player.caption}</div>}
-            {player.graphState.nodes.length === 0 ? (
-              <div className="graph-empty-state">
-                <Network className="h-8 w-8" />
-                <strong>Nenhum grafo para exibir</strong>
-                <span>Execute o algoritmo para visualizar os eventos.</span>
-              </div>
-            ) : (
-              <GraphLegend />
-            )}
+          <div className="graph-stage">
+            <div className="graph-panel">
+              <GraphCanvas
+                key={runId}
+                nodes={player.graphState.nodes}
+                edges={player.graphState.edges}
+                directed={player.directed}
+                weighted={player.weighted}
+                layout={layout}
+              />
+              {player.caption && <div className="frame-caption" role="status">{player.caption}</div>}
+              {player.graphState.nodes.length === 0 && (
+                <div className="graph-empty-state">
+                  <Network className="h-8 w-8" />
+                  <strong>Nenhum grafo para exibir</strong>
+                  <span>Execute o algoritmo para visualizar os eventos.</span>
+                </div>
+              )}
+            </div>
+            {player.graphState.nodes.length > 0 && <GraphLegend />}
           </div>
           <StructsPanel structs={player.structs} matrices={player.matrices} />
           <TimelineControls
