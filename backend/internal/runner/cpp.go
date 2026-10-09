@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,8 @@ type CppRunner struct {
 	MaxEvents          int
 	MaxLineBytes       int
 	MaxStderrBytes     int
+	MaxOutputBytes     int
+	ClangRuntimePath   string
 	MemoryBytes        uint64
 	StackBytes         uint64
 	CompileMemoryBytes uint64
@@ -39,6 +42,8 @@ func NewCppRunner(headerPath string) *CppRunner {
 		MaxEvents:          100000,
 		MaxLineBytes:       8 << 20,
 		MaxStderrBytes:     64 << 10,
+		MaxOutputBytes:     8 << 20,
+		ClangRuntimePath:   clangRuntimePath(headerPath),
 		MemoryBytes:        512 << 20,
 		StackBytes:         256 << 20,
 		CompileMemoryBytes: 2 << 30,
@@ -47,12 +52,16 @@ func NewCppRunner(headerPath string) *CppRunner {
 }
 
 type limitedBuffer struct {
-	buf bytes.Buffer
-	max int
+	buf       bytes.Buffer
+	max       int
+	truncated bool
 }
 
 func (l *limitedBuffer) Write(p []byte) (int, error) {
 	remaining := l.max - l.buf.Len()
+	if len(p) > remaining {
+		l.truncated = true
+	}
 	if remaining > 0 {
 		if len(p) > remaining {
 			l.buf.Write(p[:remaining])
@@ -171,10 +180,7 @@ func (r *CppRunner) command(ctx context.Context, dir string, argv []string) *exe
 	return cmd
 }
 
-func (r *CppRunner) compile(dir string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), r.CompileTimeout)
-	defer cancel()
-
+func (r *CppRunner) compile(ctx context.Context, dir string) string {
 	base := r.baseDir(dir)
 	argv := r.wrap(dir, true, r.compileLimits(), []string{
 		"g++", "-O2", "-pipe", "-std=c++17",
@@ -228,7 +234,7 @@ func describeExit(err error, stderr string) string {
 	return fmt.Sprintf("Erro em tempo de execução: %s\n%s", reason, message)
 }
 
-func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.ExecutionResult {
+func (r *CppRunner) execute(dir, stdin string, start time.Time, automatic bool) domain.ExecutionResult {
 	ctx, cancel := context.WithTimeout(context.Background(), r.RunTimeout)
 	defer cancel()
 
@@ -240,12 +246,30 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 	stderr := &limitedBuffer{max: r.MaxStderrBytes}
 	cmd.Stderr = stderr
 
-	stdout, err := cmd.StdoutPipe()
+	var stdout io.ReadCloser
+	var err error
+	var traceWriter *os.File
+	var programOutput *limitedBuffer
+	if automatic {
+		stdout, traceWriter, err = os.Pipe()
+		if err == nil {
+			defer stdout.Close()
+			defer traceWriter.Close()
+			cmd.ExtraFiles = []*os.File{traceWriter}
+			programOutput = &limitedBuffer{max: r.MaxOutputBytes}
+			cmd.Stdout = programOutput
+		}
+	} else {
+		stdout, err = cmd.StdoutPipe()
+	}
 	if err != nil {
 		return fail("Erro ao capturar saída")
 	}
 	if err := cmd.Start(); err != nil {
 		return fail("Erro ao executar binário")
+	}
+	if traceWriter != nil {
+		_ = traceWriter.Close()
 	}
 
 	scanner := bufio.NewScanner(stdout)
@@ -254,8 +278,15 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 	steps := make([]domain.TraceStep, 0, 256)
 	var plainOutput strings.Builder
 	limitHit := false
+	bytesRead := 0
+	bytesLimitHit := false
 
 	for scanner.Scan() {
+		bytesRead += len(scanner.Bytes()) + 1
+		if bytesRead > r.MaxOutputBytes {
+			bytesLimitHit = true
+			break
+		}
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
@@ -298,9 +329,15 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 	}
 
 	scanErr := scanner.Err()
-	if limitHit || scanErr != nil {
+	if limitHit || bytesLimitHit || scanErr != nil {
 		cancel()
 		_ = cmd.Wait()
+		if programOutput != nil {
+			plainOutput.WriteString(programOutput.String())
+		}
+		if bytesLimitHit {
+			return domain.ExecutionResult{Success: false, Steps: steps, Output: plainOutput.String(), Errors: "Limite total de saída excedido"}
+		}
 		if limitHit {
 			return domain.ExecutionResult{
 				Success: false,
@@ -321,6 +358,12 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time) domain.Execution
 	}
 
 	waitErr := cmd.Wait()
+	if programOutput != nil {
+		plainOutput.WriteString(programOutput.String())
+		if programOutput.truncated {
+			return domain.ExecutionResult{Success: false, Steps: steps, Output: plainOutput.String(), Errors: "Limite de saída do programa excedido"}
+		}
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return domain.ExecutionResult{Success: false, Steps: steps, Output: plainOutput.String(), Errors: "Time Limit Exceeded (TLE)"}
 	}
@@ -364,10 +407,33 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 	if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 		return fail("Falha ao salvar código C++")
 	}
-
-	if message := r.compile(tmpDir); message != "" {
-		return fail(message)
+	trace, message := r.instrument(tmpDir, code)
+	if message != "" {
+		// Clang and GCC accept different extensions. A failure to instrument
+		// must not prevent otherwise valid C++ from running with GCC.
+		trace = instrumentation{Mode: "unavailable", Warnings: []string{"Visualização automática indisponível para este código. " + message}}
+		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
+			return fail("Falha ao restaurar código original")
+		}
 	}
 
-	return r.execute(tmpDir, stdin, start)
+	compileCtx, cancelCompile := context.WithTimeout(context.Background(), r.CompileTimeout)
+	defer cancelCompile()
+	if message := r.compile(compileCtx, tmpDir); message != "" {
+		if trace.Mode != "automatic" {
+			return fail(message)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
+			return fail("Falha ao restaurar código original")
+		}
+		if originalError := r.compile(compileCtx, tmpDir); originalError != "" {
+			return fail(originalError)
+		}
+		trace = instrumentation{Mode: "unavailable", Warnings: []string{"Este código executou sem visualização automática porque usa construções ainda não suportadas."}}
+	}
+
+	result := r.execute(tmpDir, stdin, start, trace.Mode != "manual")
+	result.TraceMode = trace.Mode
+	result.TraceWarnings = trace.Warnings
+	return result
 }

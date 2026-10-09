@@ -1,3 +1,5 @@
+import { CPP_HEADER, CPP_MAIN } from './cppTemplate';
+
 export type DocumentationCategory = 'Grafo' | 'Vetores' | 'Estruturas' | 'Execução' | 'Auxiliares';
 
 export interface DocumentationMethod {
@@ -10,14 +12,13 @@ export interface DocumentationMethod {
   notes?: string;
 }
 
-const base = `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
+const base = `${CPP_HEADER.replace('#include <bits/stdc++.h>', '#include <bits/stdc++.h>\n#include "visualizer.h"')}
+void solve() {
 `;
 
 const finish = `}
+
+${CPP_MAIN}
 `;
 
 export const documentationMethods: DocumentationMethod[] = [

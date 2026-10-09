@@ -7,6 +7,90 @@ const nodes = (ids: number[]): GraphNode[] => ids.map((id) => ({ id, label: Stri
 const edges = (pairs: [number, number][]): GraphEdge[] => pairs.map(([source, target]) => ({ source, target }));
 
 describe('graph analysis', () => {
+  it('considera apenas arestas cujos extremos existem', () => {
+    const result = analyzeGraph(nodes([1, 2]), edges([[1, 2], [2, 99]]), false);
+    expect(result.edgeCount).toBe(1);
+    expect(result.componentCount).toBe(1);
+    expect(result.tree).toBe(true);
+  });
+
+  it('mantém os componentes separados no mapa de nós', () => {
+    const result = analyzeGraph(nodes([1, 2, 3]), edges([[1, 2]]), false);
+    const components = result.stronglyConnectedComponentByNode;
+    expect(components[1]).toBe(components[2]);
+    expect(components[1]).not.toBe(components[3]);
+    expect(result.stronglyConnectedComponents).toBe(2);
+  });
+
+  it('dois vértices isolados direcionados não são fortemente conectados', () => {
+    expect(analyzeGraph(nodes([1, 2]), [], true).stronglyConnected).toBe(false);
+    expect(analyzeGraph(nodes([1]), [], true).stronglyConnected).toBe(true);
+  });
+
+  it('bipartição e coloração independem da orientação e da ordem dos nós', () => {
+    const result = analyzeGraph(nodes([1, 2]), edges([[2, 1]]), true);
+    expect(result.bipartite).toBe(true);
+    expect(result.coloringByNode[1]).not.toBe(result.coloringByNode[2]);
+  });
+
+  it('inclui vértices sem saída no caminho Euleriano direcionado', () => {
+    expect(analyzeGraph(nodes([1, 2, 3]), edges([[1, 2], [2, 3]]), true).eulerian).toBe('path');
+  });
+
+  it('vértices isolados não impedem um percurso Euleriano pelas arestas', () => {
+    expect(analyzeGraph(nodes([1, 2, 3]), edges([[1, 2]]), false).eulerian).toBe('path');
+    expect(analyzeGraph(nodes([1, 2, 3, 4]), edges([[1, 2], [3, 4]]), false).eulerian).toBe('none');
+  });
+
+  it('um laço é um ciclo e contribui dois para o grau não direcionado', () => {
+    const result = analyzeGraph(nodes([1]), edges([[1, 1]]), false);
+    expect(result.cyclic).toBe(true);
+    expect(result.forest).toBe(false);
+    expect(result.tree).toBe(false);
+    expect(result.bipartite).toBe(false);
+    expect(result.maxDegree).toBe(2);
+    expect(result.eulerian).toBe('circuit');
+  });
+
+  it('busca um caminho Hamiltoniano começando por qualquer vértice', () => {
+    expect(analyzeGraph(nodes([2, 1, 3]), edges([[1, 2], [2, 3]]), false).hamiltonianPath).toBe(true);
+    expect(analyzeGraph(nodes([3, 2, 1]), edges([[1, 2], [2, 3]]), true).hamiltonianPath).toBe(true);
+    expect(analyzeGraph(nodes([1, 2, 3, 4]), edges([[1, 2], [1, 3], [1, 4]]), false).hamiltonianPath).toBe(false);
+  });
+
+  it('exige arestas de retorno em ciclos Hamiltonianos pequenos', () => {
+    expect(analyzeGraph(nodes([1]), [], false).hamiltonianCycle).toBe(false);
+    expect(analyzeGraph(nodes([1]), edges([[1, 1]]), true).hamiltonianCycle).toBe(true);
+    expect(analyzeGraph(nodes([1, 2]), edges([[1, 2], [2, 1]]), true).hamiltonianCycle).toBe(true);
+    expect(analyzeGraph(nodes([1, 2]), edges([[1, 2]]), true).hamiltonianCycle).toBe(false);
+    expect(analyzeGraph(nodes([1, 2]), edges([[1, 2]]), false).hamiltonianCycle).toBe(false);
+    expect(analyzeGraph(nodes([1, 2]), edges([[1, 2], [1, 2]]), false).hamiltonianCycle).toBe(true);
+  });
+
+  it('destaca o ciclo negativo mesmo quando outra componente relaxa primeiro', () => {
+    const result = analyzeGraph(nodes([1, 2, 3, 4]), [
+      { source: 1, target: 2, weight: -1 },
+      { source: 3, target: 4, weight: -3 },
+      { source: 4, target: 3, weight: 1 },
+    ], true);
+    expect(result.hasNegativeCycle).toBe(true);
+    expect(result.negativeCycleEdgeIndexes.sort()).toEqual([1, 2]);
+  });
+
+  it('analisa K5,7 sem busca fatorial por caminhos Hamiltonianos', () => {
+    const pairs: [number, number][] = [];
+    for (let u = 0; u < 5; u++) {
+      for (let v = 5; v < 12; v++) pairs.push([u, v]);
+    }
+    const result = analyzeGraph(nodes(Array.from({ length: 12 }, (_, i) => i)), edges(pairs), false);
+    expect(result.hamiltonianPath).toBe(false);
+    expect(result.hamiltonianCycle).toBe(false);
+  });
+
+  it('um grafo vazio não contém ciclos', () => {
+    expect(analyzeGraph([], [], false).cyclic).toBe(false);
+  });
+
   it('identifica uma árvore conectada', () => {
     const result = analyzeGraph(nodes([1, 2, 3]), edges([[1, 2], [1, 3]]), false);
     expect(result.tree).toBe(true);

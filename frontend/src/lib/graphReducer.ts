@@ -22,14 +22,26 @@ const EDGE_STATE_COLORS = new Map<string, string>([
 
 const COMPONENT_COLORS = ['emerald', 'orange', 'purple', 'sky', 'yellow', 'pink'];
 
-export const isDirected = (steps: TraceStep[]): boolean =>
-  !steps.some((s) => s.step_event === 'SET_DIRECTED' && s.data?.directed === false);
+function flagAt(
+  steps: TraceStep[], event: string, field: 'directed' | 'weighted' | 'multi',
+  fallback: boolean, upTo: number,
+): boolean {
+  for (let i = Math.min(upTo, steps.length - 1); i >= 0; i--) {
+    const step = steps[i];
+    const value = step.data?.[field];
+    if (step.step_event === event && typeof value === 'boolean') return value;
+  }
+  return fallback;
+}
 
-export const isWeighted = (steps: TraceStep[]): boolean =>
-  !steps.some((s) => s.step_event === 'SET_WEIGHTED' && s.data?.weighted === false);
+export const isDirected = (steps: TraceStep[], upTo = steps.length - 1): boolean =>
+  flagAt(steps, 'SET_DIRECTED', 'directed', true, upTo);
 
-export const isMulti = (steps: TraceStep[]): boolean =>
-  steps.some((s) => s.step_event === 'SET_MULTI' && s.data?.multi === true);
+export const isWeighted = (steps: TraceStep[], upTo = steps.length - 1): boolean =>
+  flagAt(steps, 'SET_WEIGHTED', 'weighted', true, upTo);
+
+export const isMulti = (steps: TraceStep[], upTo = steps.length - 1): boolean =>
+  flagAt(steps, 'SET_MULTI', 'multi', false, upTo);
 
 export const frameEnds = (steps: TraceStep[]): number[] => {
   const ends: number[] = [];
@@ -106,7 +118,7 @@ export function buildGraphState(
         if (data.id !== undefined) {
           nodesMap.set(data.id, {
             id: data.id,
-            label: data.label ?? `Node ${data.id}`,
+            label: data.label || `Node ${data.id}`,
             color: '#3b82f6',
           });
         }

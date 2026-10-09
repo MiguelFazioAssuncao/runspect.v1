@@ -172,6 +172,7 @@ interface GraphCanvasProps {
   directed?: boolean;
   weighted?: boolean;
   layout?: GraphLayout;
+  staticRender?: boolean;
   bridgeEdgeIndexes?: number[];
   articulationNodeIds?: number[];
   stronglyConnectedComponentByNode?: Record<number, number>;
@@ -188,6 +189,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     directed = true,
     weighted = true,
     layout = 'force',
+    staticRender = false,
     bridgeEdgeIndexes = EMPTY_NUMBERS,
     articulationNodeIds = EMPTY_NUMBERS,
     stronglyConnectedComponentByNode = EMPTY_RECORD,
@@ -248,7 +250,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
 
       if (width < 50 || height < 50) return;
 
-      const interactive = !window.matchMedia(COMPACT_QUERY).matches;
+      const interactive = !staticRender && !window.matchMedia(COMPACT_QUERY).matches;
 
       const layoutChanged = layoutRef.current !== layout;
       layoutRef.current = layout;
@@ -370,7 +372,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         targetPoints = nodesCopy.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }));
       }
 
-      if (layout !== 'force') {
+      if (layout !== 'force' && !staticRender) {
         nodesCopy.forEach((node) => {
           const start = initialPositions.get(node.id);
           if (start) {
@@ -454,7 +456,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
           .attr('fill', c);
       });
 
-      const root = svg.append('g').attr('transform', transformRef.current.toString());
+      const root = svg.append('g').attr('data-graph-content', '').attr('transform', transformRef.current.toString());
 
       let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
 
@@ -664,7 +666,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         node.attr('transform', (d: SimulatedNode) => `translate(${d.x ?? 0},${d.y ?? 0})`);
       };
 
-      if (layout !== 'force') {
+      if (layout !== 'force' && !staticRender) {
         const startPositions = nodesCopy.map((n) => ({
           node: n,
           x: initialPositions.get(n.id)?.x ?? width / 2,
@@ -687,8 +689,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         });
       }
 
-      let tickCount = 0;
-      simulation.on('tick', () => {
+      const rememberPositions = () => {
         nodesCopy.forEach((currentNode) => {
           currentNode.x = Math.max(
             NODE_RADIUS + NODE_PADDING,
@@ -704,7 +705,20 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
             y: currentNode.y,
           });
         });
+      };
 
+      if (staticRender) {
+        simulation.stop();
+        if (layout === 'force') simulation.tick(180);
+        rememberPositions();
+        updatePositions();
+        applyFit();
+        return;
+      }
+
+      let tickCount = 0;
+      simulation.on('tick', () => {
+        rememberPositions();
         updatePositions();
 
         tickCount++;
@@ -736,6 +750,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     directed,
     weighted,
     layout,
+    staticRender,
     bridgeEdgeIndexes,
     articulationNodeIds,
     stronglyConnectedComponentByNode,

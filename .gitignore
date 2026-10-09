@@ -7,3 +7,5 @@ frontend/coverage/
 frontend/out/
 frontend/build/
 *.log
+backend/.runtime/
+**/__pycache__/

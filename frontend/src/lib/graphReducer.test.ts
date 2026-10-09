@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGraphState, frameEnds } from './graphReducer';
+import { buildGraphState, frameEnds, isDirected, isMulti, isWeighted } from './graphReducer';
 import type { TraceStep } from '@/types/visualizer';
 
 const event = (step_event: string, data: TraceStep['data']): TraceStep => ({ step: 0, step_event, data });
@@ -12,6 +12,30 @@ const base = [
 ];
 
 describe('graphReducer semantic events', () => {
+  it('aplica a última configuração até o quadro atual, sem antecipar eventos', () => {
+    const steps = numbered([
+      event('SET_DIRECTED', { directed: false }),
+      event('SET_WEIGHTED', { weighted: false }),
+      event('SET_MULTI', { multi: true }),
+      event('SET_DIRECTED', { directed: true }),
+      event('SET_WEIGHTED', { weighted: true }),
+      event('SET_MULTI', { multi: false }),
+    ]);
+    expect(isDirected(steps, -1)).toBe(true);
+    expect(isWeighted(steps, -1)).toBe(true);
+    expect(isMulti(steps, -1)).toBe(false);
+    expect(isDirected(steps, 2)).toBe(false);
+    expect(isWeighted(steps, 2)).toBe(false);
+    expect(isMulti(steps, 2)).toBe(true);
+    expect(isDirected(steps)).toBe(true);
+    expect(isWeighted(steps)).toBe(true);
+    expect(isMulti(steps)).toBe(false);
+  });
+
+  it('usa o rótulo padrão quando add_node omite o texto', () => {
+    expect(buildGraphState([event('ADD_NODE', { id: 7, label: '' })], 0, true, false).nodes[0].label).toBe('Node 7');
+  });
+
   it('trata VECTOR_STEP como fim de quadro', () => {
     const steps = numbered([event('VECTOR_INIT', { name: 'a', values: [1] }), event('VECTOR_STEP', { name: 'a' }), event('VECTOR_MARK', { name: 'a', index: 0, state: 'sorted' })]);
     expect(frameEnds(steps)).toEqual([1, 2]);

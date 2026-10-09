@@ -259,7 +259,7 @@ int main() {
 	}
 }
 
-func TestRunCapturesPlainOutputWithoutEvents(t *testing.T) {
+func TestRunAutomaticallyVisualizesPlainOutput(t *testing.T) {
 	r := newRunner(t)
 	res := r.Run(`#include <iostream>
 int main() {
@@ -268,11 +268,11 @@ int main() {
 	if !res.Success {
 		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
 	}
-	if res.Output != "resultado normal" {
+	if res.Output != "resultado normal\n" {
 		t.Fatalf("stdout = %q, esperava resultado normal", res.Output)
 	}
-	if len(res.Steps) != 0 {
-		t.Fatalf("esperava trace vazio, vieram %d eventos", len(res.Steps))
+	if len(res.Steps) == 0 || res.TraceMode != "automatic" {
+		t.Fatalf("esperava trace automático, mode=%s, eventos=%d", res.TraceMode, len(res.Steps))
 	}
 }
 
@@ -628,8 +628,8 @@ int main() {
 	if !res.Success {
 		t.Fatalf("esperava sucesso, erro: %s", res.Errors)
 	}
-	if len(res.Steps) != 0 {
-		t.Errorf("esperava trace vazio, vieram %d eventos", len(res.Steps))
+	if len(res.Steps) == 0 || res.TraceMode != "automatic" {
+		t.Errorf("esperava visualização automática, mode=%s, eventos=%d", res.TraceMode, len(res.Steps))
 	}
 	if res.Output != "42" {
 		t.Errorf("stdout = %q", res.Output)

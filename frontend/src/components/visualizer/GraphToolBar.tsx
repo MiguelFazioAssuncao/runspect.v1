@@ -18,6 +18,7 @@ interface GraphToolbarProps {
   onToggleFullscreen: () => void;
   canRecord: boolean;
   isRecording: boolean;
+  isFinalizing?: boolean;
   onStartRecording: () => void;
   onStopRecording: () => void;
 }
@@ -36,6 +37,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onToggleFullscreen,
   canRecord,
   isRecording,
+  isFinalizing = false,
   onStartRecording,
   onStopRecording,
 }) => (
@@ -43,6 +45,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
     <select
       className="example-select"
       value={layout}
+      disabled={isRecording}
       onChange={(e) => onLayoutChange(e.target.value as GraphLayout)}
       aria-label="Layout do grafo"
     >
@@ -64,7 +67,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       <Scan className="h-3 w-3" />
     </button>
 
-    <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph} type="button">
+    <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph || isRecording} title="Opções de download do grafo em SVG" aria-label="Exportar grafo em SVG" type="button">
       <Download className="h-3 w-3" /> SVG
     </button>
     <button className="toolbar-button" onClick={onExportJson} disabled={!hasSteps} type="button">
@@ -72,7 +75,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
     </button>
 
     {isRecording ? (
-      <button className="toolbar-button toolbar-button-recording" onClick={onStopRecording} title="Parar gravação" type="button">
+      <button className="toolbar-button toolbar-button-recording" onClick={onStopRecording} disabled={isFinalizing} title="Parar gravação" type="button">
         <Square className="h-3 w-3" /> Parar
       </button>
     ) : (
