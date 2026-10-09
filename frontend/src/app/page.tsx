@@ -15,6 +15,7 @@ import { SvgExportDialog } from '@/components/visualizer/SvgExportDialog';
 import { GraphLegend } from '@/components/visualizer/GraphLegend';
 import { TimelineControls } from '@/components/visualizer/TimelineControls';
 import { StructsPanel } from '@/components/visualizer/StructsPanel';
+import { ProgramConsole } from '@/components/visualizer/ProgramConsole';
 import { VectorSortPanel } from '@/components/visualizer/VectorSortPanel';
 import { GraphAnalysisPanel } from '@/components/visualizer/GraphAnalysisPanel';
 import { analyzeGraph } from '@/lib/graphAnalysis';
@@ -23,6 +24,7 @@ import { examples } from '@/lib/examples';
 import { DEFAULT_CPP_CODE } from '@/lib/cppTemplate';
 import { convertToPureCpp } from '@/lib/codeConversion';
 import { exportJson } from '@/lib/export';
+import { terminalOutput } from '@/lib/terminalOutput';
 import { captureSvgSnapshot, DEFAULT_SVG_OPTIONS } from '@/lib/svgExport';
 import type { SvgExportOptions, SvgSnapshot } from '@/lib/svgExport';
 import { boundedOperation, createRecordingPlan, recordVisualization, RecordingStopped, RECORDING_BG, throwIfRecordingAborted } from '@/lib/recording';
@@ -85,13 +87,15 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
 
   const hasGraph = player.graphState.nodes.length > 0;
   const hasVectors = player.vectors.length > 0;
-  const hasStructs = player.structs.length > 0 || player.matrices.length > 0;
+  const visibleStructs = player.structs.filter(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0));
+  const hasStructs = visibleStructs.length > 0 || player.matrices.length > 0;
   const hasVisualization = hasGraph || hasVectors || hasStructs;
+  const hasProgramConsole = !!player.programConsole.output || player.programConsole.warnings.length > 0;
 
   return (
     <>
       {!hasGraph && player.caption && <div className="frame-caption frame-caption-inline" role="status">{player.caption}</div>}
-      <div className={`graph-stage ${hasVectors && !hasGraph ? 'graph-stage-vector-only' : ''}`}>
+      <div className={`graph-stage ${!hasGraph && hasVisualization ? 'graph-stage-data-only' : ''} ${hasVectors && !hasGraph ? 'graph-stage-vector-only' : ''}`}>
         {hasGraph && (
           <div className="graph-panel">
             <GraphCanvas
@@ -114,8 +118,10 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
             {player.caption && <div className="frame-caption" role="status">{player.caption}</div>}
           </div>
         )}
+        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={player.matrices} primary solo={!hasVectors} />}
         <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />
-        {!hasVisualization && (
+        {!hasVisualization && hasProgramConsole && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
+        {!hasVisualization && !hasProgramConsole && (
           <div className="graph-panel">
             <div className="graph-empty-state">
               <Network className="h-8 w-8" />
@@ -126,8 +132,8 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
                 </>
               ) : (
                 <>
-                  <strong>Este algoritmo não possui visualização compatível</strong>
-                  <span>A saída do programa continua disponível no terminal.</span>
+                  <strong>Nenhum dado visual neste passo</strong>
+                  <span>Avance na linha do tempo para acompanhar o algoritmo.</span>
                 </>
               )}
             </div>
@@ -136,11 +142,12 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
         {hasGraph && <GraphLegend />}
       </div>
       {!staticRender && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
-      <StructsPanel structs={player.structs} matrices={player.matrices} />
+      {hasGraph && <StructsPanel structs={player.structs} matrices={player.matrices} />}
+      {hasVisualization && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
     </>
   );
 }, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
-  (['graphState', 'vectors', 'vectorIssues', 'logs', 'structs', 'matrices', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
+  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
   const [code, setCode] = useState(DEFAULT_CPP_CODE);
@@ -155,6 +162,7 @@ export default function Home() {
   const [runId, setRunId] = useState(0);
   const [layout, setLayout] = useState<GraphLayout>('force');
   const [output, setOutput] = useState('Aguardando uma execução...');
+  const [untracedOutput, setUntracedOutput] = useState('');
   const [hasError, setHasError] = useState(false);
   const [traceMode, setTraceMode] = useState<ExecutionResult['trace_mode']>();
   const [isLoading, setIsLoading] = useState(false);
@@ -219,8 +227,13 @@ export default function Home() {
 
   const hasGraph = player.graphState.nodes.length > 0;
   const hasVectors = player.vectors.length > 0;
-  const hasStructs = player.structs.length > 0 || player.matrices.length > 0;
+  const hasStructs = player.structs.some(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0)) || player.matrices.length > 0;
   const hasVisualization = hasGraph || hasVectors || hasStructs;
+
+  const playbackCompleted = player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1;
+  const terminalText = isLoading || hasError || steps.length === 0
+    ? output
+    : terminalOutput(player.programConsole.output || (playbackCompleted ? untracedOutput : ''), output, playbackCompleted);
 
   useEffect(() => {
     let active = true;
@@ -407,6 +420,9 @@ export default function Home() {
   const runCode = async (source = code, input = stdin) => {
     if (recordingSessionRef.current || runRequestRef.current) return;
     runRequestRef.current = true;
+    player.setIsPlaying(false);
+    setSteps([]);
+    setUntracedOutput('');
     setIsLoading(true);
     setHasError(false);
     setOutput('Compilando e executando...');
@@ -427,15 +443,18 @@ export default function Home() {
             : `O servidor retornou uma resposta inválida (HTTP ${response.status}).`,
         );
       }
-      setSteps(result.steps ?? []);
       setTraceMode(result.trace_mode);
       setRunId((id) => id + 1);
       if (!response.ok || !result.success) {
+        setSteps([]);
         setHasError(true);
-        setOutput(result.errors || result.error || `A execução falhou (HTTP ${response.status}).`);
-      } else {
         const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
-        setOutput(`${result.output ? `${result.output}\n` : ''}Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`);
+        setOutput(`${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`);
+      } else {
+        setSteps(result.steps ?? []);
+        setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
+        const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
+        setOutput(`Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`);
       }
     } catch (error) {
       setHasError(true);
@@ -592,7 +611,7 @@ export default function Home() {
               }}
               onRun={() => void runCode()}
               isLoading={isLoading}
-              output={output}
+              output={terminalText}
               hasError={hasError}
               logs={player.logs}
               activeLine={player.line}

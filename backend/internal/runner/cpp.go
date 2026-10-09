@@ -398,6 +398,49 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time, automatic bool) 
 	}
 }
 
+func finishExecution(result domain.ExecutionResult, trace instrumentation) domain.ExecutionResult {
+	result.TraceMode = trace.Mode
+	result.TraceWarnings = append([]string(nil), trace.Warnings...)
+	var tracedOutput strings.Builder
+	for _, step := range result.Steps {
+		if step.StepEvent == "PROGRAM_OUTPUT" {
+			if chunk, ok := step.Data["text"].(string); ok {
+				tracedOutput.WriteString(chunk)
+			}
+		}
+		if step.StepEvent == "INPUT_ERROR" || step.StepEvent == "RUNTIME_ERROR" {
+			if message, ok := step.Data["message"].(string); ok {
+				result.Success = false
+				result.Errors = message
+			}
+		}
+	}
+	remaining := strings.TrimPrefix(result.Output, tracedOutput.String())
+	if trace.Mode != "manual" && remaining != "" {
+		// Only untraced output (e.g. printf or output beyond the frame limit)
+		// belongs to the final frame. cout chunks already have their own lines.
+		output := domain.TraceStep{StepEvent: "PROGRAM_OUTPUT", Data: map[string]any{"text": remaining}}
+		if !strings.HasPrefix(result.Output, tracedOutput.String()) {
+			output.Data["replace"] = true
+		}
+		if len(result.Steps) == 0 {
+			result.Steps = append(result.Steps, domain.TraceStep{StepEvent: "STEP", Data: map[string]any{"caption": "Início da execução"}})
+		}
+		last := len(result.Steps) - 1
+		if last > 0 && result.Steps[last].StepEvent == "STEP" {
+			final := result.Steps[last]
+			result.Steps[last] = output
+			result.Steps = append(result.Steps, final)
+		} else {
+			result.Steps = append(result.Steps, output, domain.TraceStep{StepEvent: "STEP", Data: map[string]any{"caption": "Saída do programa"}})
+		}
+		for i := range result.Steps {
+			result.Steps[i].Step = i + 1
+		}
+	}
+	return result
+}
+
 func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 	start := time.Now()
 
@@ -427,8 +470,7 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 			return fail("Falha ao preparar binário em cache")
 		}
 		result := r.execute(tmpDir, stdin, start, cached.trace.Mode != "manual")
-		result.TraceMode, result.TraceWarnings = cached.trace.Mode, cached.trace.Warnings
-		return result
+		return finishExecution(result, cached.trace)
 	}
 	trace, message := r.instrument(tmpDir, code)
 	if message != "" {
@@ -470,7 +512,5 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 		}
 	}
 	result := r.execute(tmpDir, stdin, start, trace.Mode != "manual")
-	result.TraceMode = trace.Mode
-	result.TraceWarnings = trace.Warnings
-	return result
+	return finishExecution(result, trace)
 }

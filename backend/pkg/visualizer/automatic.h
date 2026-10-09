@@ -7,6 +7,8 @@
 #include <bitset>
 #include <cmath>
 #include <cerrno>
+#include <cstdlib>
+#include <cstdio>
 #include <deque>
 #include <exception>
 #include <iomanip>
@@ -26,8 +28,7 @@
 
 namespace runspect_auto {
 
-// Trace events use FD 3, separate from the user's stdout. No stream redirection
-// or extra newline is added to ordinary cout/printf output.
+// Trace events use FD 3, separate from the user's stdout.
 class TraceBuffer : public std::streambuf {
     std::string pending;
     bool write_all(const char* data, std::streamsize count) {
@@ -76,6 +77,66 @@ inline bool program_started = false;
 inline bool limit_emitted = false;
 inline bool items_limit_emitted = false;
 
+// Forward cout to its original buffer and retain only the bytes written since
+// the last frame. Formatting, flushing, and the program's stdout stay intact.
+class OutputBuffer : public std::streambuf {
+public:
+    std::streambuf* destination = nullptr;
+    std::string pending;
+    static constexpr size_t max_bytes = 8 << 20;
+    void remember(const char* data, size_t count) {
+        pending.append(data, std::min(count, max_bytes - pending.size()));
+    }
+protected:
+    std::streamsize xsputn(const char* data, std::streamsize count) override {
+        auto written = destination->sputn(data, count);
+        if (written > 0) remember(data, static_cast<size_t>(written));
+        return written;
+    }
+    int overflow(int ch) override {
+        if (ch == traits_type::eof()) return traits_type::not_eof(ch);
+        auto result = destination->sputc(static_cast<char>(ch));
+        if (result != traits_type::eof()) {
+            char value = static_cast<char>(ch);
+            remember(&value, 1);
+        }
+        return result;
+    }
+    int sync() override { return destination->pubsync(); }
+    pos_type seekoff(off_type offset, std::ios_base::seekdir way, std::ios_base::openmode mode) override {
+        return destination->pubseekoff(offset, way, mode);
+    }
+    pos_type seekpos(pos_type position, std::ios_base::openmode mode) override {
+        return destination->pubseekpos(position, mode);
+    }
+};
+
+inline OutputBuffer& output_buffer() {
+    // cout can still be used by atexit/static destructors after Completion.
+    // Keep the forwarding buffer alive until the process exits.
+    static auto* buffer = new OutputBuffer;
+    return *buffer;
+}
+
+inline void capture_output() {
+    if (!program_started) return;
+    auto& buffer = output_buffer();
+    if (std::cout.rdbuf() == &buffer) return;
+    // sync_with_stdio(false) replaces cout's buffer. Reattach at the next frame.
+    auto state = std::cout.rdstate();
+    buffer.destination = std::cout.rdbuf(&buffer);
+    std::cout.clear(state);
+}
+
+inline void flush_output(int line) {
+    capture_output();
+    auto& buffer = output_buffer();
+    if (buffer.pending.empty() || !program_started || frame_count >= max_frames) return;
+    connect();
+    viz::event_stream() << "{\"step_event\":\"PROGRAM_OUTPUT\",\"text\":\"" << viz::escape_json(buffer.pending) << "\",\"line\":" << line << "}\n";
+    buffer.pending.clear();
+}
+
 inline bool enabled() {
     if (!program_started) return false;
     connect();
@@ -87,7 +148,27 @@ inline bool enabled() {
     return false;
 }
 
-inline void start() { program_started = true; connect(); }
+inline void start() { program_started = true; connect(); capture_output(); }
+
+[[noreturn]] inline void fail_execution(const char* event, const std::string& message, int line) {
+    flush_output(line);
+    connect();
+    viz::event_stream() << "{\"step_event\":\"" << event << "\",\"message\":\"" << viz::escape_json(message) << "\",\"line\":" << line << "}\n";
+    viz::step(message, line);
+    std::cout.flush();
+    std::fflush(stdout);
+    std::_Exit(65);
+}
+
+// A failed standalone read must stop before an uninitialized value is used.
+// Reads used as conditions (while/if) intentionally handle failure themselves.
+inline void check_input(const std::istream& input, int line) {
+    if (!input.fail() || !program_started) return;
+    std::string message = input.eof()
+        ? "Entrada insuficiente na linha " + std::to_string(line) + ": cin tentou ler depois do fim do stdin. Complete os dados de entrada."
+        : "Entrada inválida na linha " + std::to_string(line) + ": cin não conseguiu ler o valor esperado. Confira os dados de entrada.";
+    fail_execution("INPUT_ERROR", message, line);
+}
 
 inline void items_limit() {
     if (!items_limit_emitted) {
@@ -183,6 +264,7 @@ inline std::set<std::string> sorting_vectors;
 inline std::set<std::string> truncated_vectors;
 inline std::set<long double> infinity_values;
 inline std::map<std::string,std::string> structure_cache;
+inline std::vector<std::string> last_scalars;
 inline std::map<std::string,std::vector<std::vector<std::string>>> matrix_cache;
 inline int read_line = -1;
 struct Access { std::string name; int index; std::string value; };
@@ -349,9 +431,10 @@ class Frame {
     int line;
     bool active;
 public:
-    Frame(const char* caption, int line) : caption(caption), line(line), active(enabled()) {}
+    Frame(const char* caption, int line) : caption(caption), line(line), active(enabled()) { flush_output(line); }
     ~Frame() {
         if (!active) return;
+        if (!scalars.empty()) last_scalars = scalars;
         show_structure("Variáveis", scalars, line);
         show_structure("Execução", {"linha " + std::to_string(line)}, line);
         viz::step(caption, line);
@@ -540,6 +623,11 @@ public:
 };
 
 template<class C,class I> decltype(auto) read(const char* name, C& container, I index, int line) {
+    if constexpr (sequence<bare<C>>::value || bits<bare<C>>::value) {
+        if (program_started && (index < 0 || static_cast<size_t>(index) >= std::size(container))) {
+            fail_execution("RUNTIME_ERROR", "Índice fora dos limites na linha " + std::to_string(line) + ": " + name + "[" + std::to_string(index) + "]. Confira os dados de entrada e os limites do vetor.", line);
+        }
+    }
     if (enabled()) {
         const auto size = std::size(container);
         if (index >= 0 && static_cast<size_t>(index) < std::min<size_t>(size,max_items) && vectors.count(name)) {
@@ -634,6 +722,7 @@ inline void match(const char* text_name, const char* pattern_name, int position,
 }
 
 inline void finish() {
+    flush_output(0);
     if (!enabled()) return;
     for (const auto& entry : vectors) {
         reset_vector(entry.first, 0);
@@ -655,6 +744,7 @@ inline void finish() {
         for (size_t i = 0; i < entry.second.size(); ++i) viz::vector_mark(entry.first, static_cast<int>(i), viz::VectorState::Found, 0);
         viz::event_stream() << "{\"step_event\":\"GRAPH_PATH\",\"path\":" << viz::integers_json(entry.second) << ",\"color\":\"green\",\"line\":0}\n";
     }
+    if (!last_scalars.empty()) show_structure("Variáveis", last_scalars, 0);
     show_structure("Execução", {"concluída"}, 0);
     viz::step(path_found ? "Execução concluída — caminho encontrado" : "Execução concluída", 0);
     ++frame_count;

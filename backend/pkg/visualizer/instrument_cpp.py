@@ -248,6 +248,7 @@ class Instrumenter:
         if node.kind == self.K.CALL_EXPR and node.spelling == "operator>>":
             refs = [sub for sub in self.descendants(node) if sub.kind == self.K.DECL_REF_EXPR]
             if any(sub.spelling == "cin" for sub in refs):
+                updates.append(f"::runspect_auto::check_input(std::cin,{node.location.line});")
                 for call in [node, *self.descendants(node)]:
                     if call.kind != self.K.CALL_EXPR or call.spelling != "operator>>": continue
                     args = list(call.get_arguments())

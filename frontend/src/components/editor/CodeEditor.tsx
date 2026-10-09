@@ -81,7 +81,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, [logs.length]);
+  }, [logs.length, output]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 h-full w-full bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">

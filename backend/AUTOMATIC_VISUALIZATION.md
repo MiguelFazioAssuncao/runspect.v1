@@ -6,8 +6,14 @@ O código do editor permanece original. O player recebe os mesmos eventos
 de vetores, grafos, estruturas e passos utilizados pela API manual.
 
 Após executar, o player abre no primeiro passo que apresenta um vetor,
-grafo, matriz ou estrutura do programa. Os passos anteriores continuam
+grafo, matriz ou estrutura do programa. Em algoritmos que usam apenas
+escalares, ele abre no primeiro passo com variáveis preenchidas. Os passos anteriores continuam
 disponíveis pela linha do tempo e pelo botão Reiniciar.
+
+Sem grafo, variáveis, tuplas, opcionais e matrizes ocupam a área principal
+de visualização, junto aos vetores existentes. Variáveis escalares aparecem
+como cartões de nome e valor. O quadro de conclusão preserva os últimos
+valores escalares observados, inclusive quando o algoritmo está em `solve()`.
 
 ## O que é acompanhado
 
@@ -96,6 +102,20 @@ grafos acompanha uma representação por execução.
 
 Os eventos automáticos usam um pipe separado da saída padrão. `cout` e
 `printf` continuam produzindo a saída do programa, incluindo JSON comum.
+O modo automático registra os bytes escritos por `cout` em eventos
+`PROGRAM_OUTPUT`, associados ao passo da linha executada. O terminal e o
+painel de saída acumulam somente os eventos até o passo atual; voltar na
+linha do tempo também desfaz essas impressões. Saída sem acompanhamento por
+linha, como `printf`, aparece no último passo.
+
+Uma leitura isolada de `cin` que falha por entrada inválida ou insuficiente
+emite `INPUT_ERROR` e encerra imediatamente o binário. A resposta retorna
+`success: false` e o erro com a linha original. Leituras usadas como condições
+de `if`/`while` mantêm o tratamento de falha escrito pelo autor. Acessos
+instrumentados fora dos limites de sequências emitem `RUNTIME_ERROR` antes do
+acesso. O frontend descarta a reprodução de execuções que falharam e mostra
+o erro no terminal.
+
 As observações não reavaliam índices e preservam o curto-circuito de
 condições. Escalares e arrays sem inicialização não são lidos por uma
 observação. Valores passados por ponteiros e objetos personalizados não

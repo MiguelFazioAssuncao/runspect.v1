@@ -93,6 +93,9 @@ mostra os bits como um vetor de zeros e uns. Comandos dentro de `switch`
 também geram passos, incluindo a identificação de cada caso alcançado.
 O catálogo inclui **Tuplas e resultado opcional** e **Bits e seleção com
 switch** para experimentar esses recursos com C++17 comum.
+Algoritmos como exponenciação binária modular e MDC de Euclides mostram
+cartões com as variáveis na área principal. Esses cartões acompanham os
+passos e preservam os últimos valores no quadro de conclusão.
 
 Listas de adjacência e listas de arestas podem gerar grafos automaticamente.
 Essa interpretação é inferida a partir dos tipos, nomes e operações; não há
@@ -503,8 +506,8 @@ int main() {
 
 ## 9. Limitações importantes observadas
 
-- O programa C++ precisa escrever os eventos por meio da API para que eles
-  apareçam na visualização; `cout` comum não vira automaticamente um passo.
+- No modo automático, `cout` aparece no terminal conforme a linha do tempo
+  avança. A API `viz` permite controlar eventos explicitamente no modo manual.
 - `highlight_edge` só altera uma aresta que já exista no estado reconstruído.
 - O visualizador ignora arestas com extremos inexistentes ou laços
   (`u == v`).

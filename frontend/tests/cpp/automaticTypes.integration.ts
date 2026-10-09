@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { examples } from '../../src/lib/examples';
 import { buildVectorsState, createVectorReplay } from '../../src/lib/vectorReducer';
+import { frameEnds } from '../../src/lib/graphReducer';
+import { playerStartFrame } from '../../src/lib/playerStart';
 import type { TraceStep } from '../../src/types/visualizer';
 
 let directory: string;
@@ -35,6 +37,20 @@ function runExample(id: string): TraceStep[] {
 }
 
 describe('novos tipos no player automático', () => {
+  it.each([
+    ['binary-exponentiation', ['base = 65536', 'expoente = 0', 'modulo = 1000000007', 'resultado = 1024']],
+    ['euclidean-gcd', ['a = 6', 'b = 0']],
+  ])('%s inicia com valores escalares e conserva o resultado no último quadro', (id, expected) => {
+    const steps = runExample(id);
+    const frames = frameEnds(steps);
+    const firstFrame = playerStartFrame(steps, frames, true);
+    const start = steps.slice(0, frames[firstFrame] + 1).filter((step) => step.step_event === 'SET_STRUCT' && step.data?.name === 'Variáveis').at(-1);
+    expect(start?.data?.items?.length).toBeGreaterThan(0);
+    const final = steps.filter((step) => step.step_event === 'SET_STRUCT' && step.data?.name === 'Variáveis').at(-1);
+    expect(final?.data?.items).toEqual(expected);
+    expect(steps.some((step) => step.step_event === 'VECTOR_INIT' || step.step_event === 'ADD_NODE')).toBe(false);
+    expect(steps.at(-1)?.data?.caption).toBe('Execução concluída');
+  });
   it('reproduz alterações dos bits e permite voltar ao estado inicial', () => {
     const steps = runExample('bitset-switch');
     const end = buildVectorsState(steps, steps.length - 1);
