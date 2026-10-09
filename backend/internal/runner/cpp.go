@@ -28,6 +28,10 @@ type CppRunner struct {
 	MaxStderrBytes     int
 	MaxOutputBytes     int
 	ClangRuntimePath   string
+	CompilerCachePath  string
+	AnalysisTimeout    time.Duration
+	CacheMaxBytes      int
+	cache              compiledCache
 	MemoryBytes        uint64
 	StackBytes         uint64
 	CompileMemoryBytes uint64
@@ -38,12 +42,15 @@ func NewCppRunner(headerPath string) *CppRunner {
 	return &CppRunner{
 		HeaderPath:         headerPath,
 		CompileTimeout:     10 * time.Second,
+		AnalysisTimeout:    30 * time.Second,
+		CacheMaxBytes:      16 << 20,
 		RunTimeout:         3 * time.Second,
 		MaxEvents:          100000,
 		MaxLineBytes:       8 << 20,
 		MaxStderrBytes:     64 << 10,
 		MaxOutputBytes:     8 << 20,
 		ClangRuntimePath:   clangRuntimePath(headerPath),
+		CompilerCachePath:  compilerCachePath(),
 		MemoryBytes:        512 << 20,
 		StackBytes:         256 << 20,
 		CompileMemoryBytes: 2 << 30,
@@ -155,6 +162,9 @@ func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string) []stri
 			"--setenv", "TMPDIR", "/tmp",
 			"--setenv", "HOME", "/tmp",
 		)
+		if r.CompilerCachePath != "" {
+			args = append(args, "--ro-bind", r.CompilerCachePath, r.CompilerCachePath)
+		}
 	} else {
 		args = append(args, "--ro-bind", dir, "/work")
 	}
@@ -182,12 +192,16 @@ func (r *CppRunner) command(ctx context.Context, dir string, argv []string) *exe
 
 func (r *CppRunner) compile(ctx context.Context, dir string) string {
 	base := r.baseDir(dir)
-	argv := r.wrap(dir, true, r.compileLimits(), []string{
-		"g++", "-O2", "-pipe", "-std=c++17",
+	args := []string{"g++", "-O0", "-pipe", "-std=c++17"}
+	if r.CompilerCachePath != "" {
+		args = append(args, "-I", r.CompilerCachePath)
+	}
+	args = append(args,
 		"-I", base,
-		base + "/solution.cpp",
-		"-o", base + "/solution",
-	})
+		base+"/solution.cpp",
+		"-o", base+"/solution",
+	)
+	argv := r.wrap(dir, true, r.compileLimits(), args)
 
 	out := &limitedBuffer{max: r.MaxStderrBytes}
 	cmd := r.command(ctx, dir, argv)
@@ -407,6 +421,15 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 	if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 		return fail("Falha ao salvar código C++")
 	}
+	key := r.cacheKey(code, headerContent)
+	if cached, ok := r.cache.get(key, r.CacheMaxBytes); ok {
+		if err := os.WriteFile(filepath.Join(tmpDir, "solution"), cached.binary, 0700); err != nil {
+			return fail("Falha ao preparar binário em cache")
+		}
+		result := r.execute(tmpDir, stdin, start, cached.trace.Mode != "manual")
+		result.TraceMode, result.TraceWarnings = cached.trace.Mode, cached.trace.Warnings
+		return result
+	}
 	trace, message := r.instrument(tmpDir, code)
 	if message != "" {
 		// Clang and GCC accept different extensions. A failure to instrument
@@ -418,20 +441,34 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 	}
 
 	compileCtx, cancelCompile := context.WithTimeout(context.Background(), r.CompileTimeout)
-	defer cancelCompile()
-	if message := r.compile(compileCtx, tmpDir); message != "" {
+	compileMessage := r.compile(compileCtx, tmpDir)
+	cancelCompile()
+	if message := compileMessage; message != "" {
 		if trace.Mode != "automatic" {
 			return fail(message)
 		}
 		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 			return fail("Falha ao restaurar código original")
 		}
-		if originalError := r.compile(compileCtx, tmpDir); originalError != "" {
+		// The original program gets its own compilation budget. A timed-out
+		// instrumented attempt must not leave the fallback context expired.
+		fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), r.CompileTimeout)
+		originalError := r.compile(fallbackCtx, tmpDir)
+		cancelFallback()
+		if originalError != "" {
 			return fail(originalError)
 		}
 		trace = instrumentation{Mode: "unavailable", Warnings: []string{"Este código executou sem visualização automática porque usa construções ainda não suportadas."}}
 	}
 
+	if trace.Mode == "manual" || trace.Mode == "automatic" {
+		path := filepath.Join(tmpDir, "solution")
+		if info, err := os.Stat(path); err == nil && r.CacheMaxBytes > 0 && info.Size() <= int64(r.CacheMaxBytes) {
+			if binary, err := os.ReadFile(path); err == nil {
+				r.cache.put(key, compiledProgram{binary: binary, trace: trace}, r.CacheMaxBytes)
+			}
+		}
+	}
 	result := r.execute(tmpDir, stdin, start, trace.Mode != "manual")
 	result.TraceMode = trace.Mode
 	result.TraceWarnings = trace.Warnings

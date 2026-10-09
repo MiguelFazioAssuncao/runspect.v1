@@ -88,6 +88,11 @@ executá-lo. O backend observa estruturas e operações reconhecidas, gerando
 passos para o mesmo player. Strings aparecem como códigos de caracteres,
 vetores mostram escritas e trocas, e os elementos consultados recebem
 destaques. Variáveis e matrizes aparecem nos painéis de estruturas.
+Tuplas e resultados opcionais aparecem nesses mesmos painéis; `bitset`
+mostra os bits como um vetor de zeros e uns. Comandos dentro de `switch`
+também geram passos, incluindo a identificação de cada caso alcançado.
+O catálogo inclui **Tuplas e resultado opcional** e **Bits e seleção com
+switch** para experimentar esses recursos com C++17 comum.
 
 Listas de adjacência e listas de arestas podem gerar grafos automaticamente.
 Essa interpretação é inferida a partir dos tipos, nomes e operações; não há
@@ -349,7 +354,7 @@ func (r *CppRunner) Run(code string) domain.ExecutionResult
 ```
 
 Executa o ciclo completo: cria o diretório temporário, copia
-`visualizer.h`, salva `solution.cpp`, compila com `g++ -O2 -std=c++17`, executa
+`visualizer.h`, salva `solution.cpp`, compila com `g++ -O0 -std=c++17`, executa
 com timeout, lê cada linha de `stdout`, ignora linhas que não sejam eventos
 JSON válidos e devolve os passos e o tempo total.
 

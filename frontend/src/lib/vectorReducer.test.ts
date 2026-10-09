@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildVectorsState } from './vectorReducer';
+import { buildVectorsState, createVectorReplay } from './vectorReducer';
 import type { TraceStep } from '@/types/visualizer';
 
 const event = (step_event: string, data: TraceStep['data']): TraceStep => ({ step: 0, step_event, data });
@@ -9,6 +9,32 @@ const valuesAt = (steps: TraceStep[], at: number) => vectorAt(steps, at).items.m
 const statesAt = (steps: TraceStep[], at: number) => vectorAt(steps, at).items.map((item) => item.state);
 
 describe('vectorReducer', () => {
+  it('preserva números e reconstrói os rótulos de infinito ao avançar e retroceder', () => {
+    const infinity = 9223372036854776000;
+    const steps = numbered([
+      event('VECTOR_INIT', { name: 'dist', values: [0, infinity], value_labels: [null, '∞'] }),
+      event('VECTOR_SET', { name: 'dist', index: 1, value: 7, value_label: null }),
+      event('VECTOR_SET', { name: 'dist', index: 1, value: infinity, value_label: '∞' }),
+      event('VECTOR_RESULT', { name: 'dist', values: [0, infinity], value_labels: [null, '∞'] }),
+    ]);
+    const replay = createVectorReplay(steps);
+    expect(replay(3).vectors[0].items[1]).toMatchObject({ value: infinity, displayValue: '∞' });
+    expect(replay(1).vectors[0].items[1]).toEqual({ index: 1, value: 7, state: 'active' });
+    expect(replay(0).vectors[0].items[1]).toMatchObject({ value: infinity, displayValue: '∞' });
+    expect(replay(3).issues).toEqual([]);
+  });
+
+  it('atualiza rótulos quando uma sentinela é reconhecida depois de inicializar o vetor', () => {
+    const steps = numbered([
+      event('VECTOR_INIT', { name: 'distance', values: [0, 1000000000] }),
+      event('VECTOR_LABELS', { name: 'distance', value_labels: [null, '∞'] }),
+      event('VECTOR_SWAP', { name: 'distance', a: 0, b: 1 }),
+    ]);
+    expect(vectorAt(steps, 2).items[0]).toMatchObject({ value: 1000000000, displayValue: '∞' });
+    expect(vectorAt(steps, 2).items[1].displayValue).toBeUndefined();
+    expect(buildVectorsState(steps, 2).issues).toEqual([]);
+  });
+
   const sortSteps = numbered([
     event('VECTOR_INIT', { name: 'a', values: [2, -1, 2] }),
     event('VECTOR_COMPARE', { name: 'a', a: 0, b: 1, caption: 'comparando' }),
@@ -87,6 +113,21 @@ describe('vectorReducer', () => {
     ]);
     expect(statesAt(steps, 1)).toEqual(['default', 'comparing', 'default']);
     expect(statesAt(steps, 3)).toEqual(['default', 'found', 'default']);
+  });
+
+  it('mantém o encontrado verde mesmo sem STEP entre consulta e marcação', () => {
+    const steps = numbered([
+      event('VECTOR_INIT', { name: 'a', values: [1, 3, 5] }),
+      event('VECTOR_PROBE', { name: 'a', index: 1 }),
+      event('VECTOR_PIVOT', { name: 'a', index: 1 }),
+      event('VECTOR_MARK', { name: 'a', index: 1, state: 'found' }),
+      event('VECTOR_PROBE', { name: 'a', index: 1 }),
+      event('VECTOR_RESULT', { name: 'a', values: [1, 3, 5], caption: 'Execução concluída' }),
+    ]);
+    expect(statesAt(steps, 3)).toEqual(['default', 'found', 'default']);
+    expect(statesAt(steps, 4)).toEqual(['default', 'found', 'default']);
+    expect(vectorAt(steps, 5)).toMatchObject({ operation: null, range: null, pivot: null, caption: 'Execução concluída' });
+    expect(statesAt(steps, 1)).toEqual(['default', 'comparing', 'default']);
   });
 
   it('escreve valores e marca a posição como ativa', () => {

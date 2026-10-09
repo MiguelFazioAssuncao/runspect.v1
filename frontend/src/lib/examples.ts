@@ -753,6 +753,48 @@ cada
     cout << resultado << endl;`,
   'Calcula base^expoente módulo m por quadrados sucessivos. Entrada: base, expoente ≥ 0 e módulo > 0. Saída: resíduo. Usa __int128 do GCC para evitar overflow nas multiplicações de ll.', 'O(log expoente)', 'O(1)', ['fast power', 'binpow', 'modular', 'potência'], '1024\n'),
 
+  define('tuple-optional', 'Tuplas e resultado opcional', 'Estruturas', `4
+1 12
+2 8
+3 25
+4 20
+`, `    int n;
+    cin >> n;
+    vector<tuple<ll, ll>> registros;
+    optional<tuple<ll, ll>> melhor;
+    for (int i = 0; i < n; i++) {
+        ll id, pontos;
+        cin >> id >> pontos;
+        tuple<ll, ll> registro{id, pontos};
+        registros.push_back(registro);
+        if (!melhor || get<1>(registro) > get<1>(*melhor)) melhor = registro;
+    }
+    if (melhor) cout << get<0>(*melhor) << ' ' << get<1>(*melhor) << endl;
+    else cout << "SEM RESULTADO" << endl;`,
+  'Acompanha tuplas de identificador e pontuação e um resultado que começa vazio. Entrada: n e n pares id pontos. Saída: id e pontos do primeiro registro com a maior pontuação, ou SEM RESULTADO.', 'O(n)', 'O(n)', ['tuple', 'optional', 'tuplas', 'registros'], '3 25\n'),
+
+  define('bitset-switch', 'Bits e seleção com switch', 'Estruturas', `4
+1 0
+1 3
+3 0
+1 6
+`, `    int q;
+    cin >> q;
+    bitset<8> flags;
+    while (q--) {
+        int operacao, indice;
+        cin >> operacao >> indice;
+        if (indice < 0 || indice >= 8) continue;
+        switch (operacao) {
+            case 1: flags.set(indice); break;
+            case 2: flags.reset(indice); break;
+            case 3: flags.flip(indice); break;
+            default: break;
+        }
+    }
+    cout << flags.to_string() << endl;`,
+  'Visualiza oito bits e cada caso executado no switch. O índice 0 é o bit menos significativo, à direita na saída textual. Entrada: q e q pares operação índice (1 liga, 2 desliga, 3 inverte); índices de 0 a 7. Saída: os oito bits finais.', 'O(q)', 'O(1)', ['bitset', 'bits', 'switch', 'máscara'], '01001000\n'),
+
   define('euclidean-gcd', 'Euclides: máximo divisor comum', 'Matemática', `48 18
 `, `    ll a, b;
     cin >> a >> b;

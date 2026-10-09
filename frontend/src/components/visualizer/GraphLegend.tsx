@@ -7,6 +7,7 @@ const ITEMS = [
   { color: '#eab308', label: 'descoberto' },
   { color: '#f97316', label: 'processando' },
   { color: '#10b981', label: 'concluído' },
+  { color: '#22c55e', label: 'encontrado / caminho final' },
   { color: '#ef4444', label: 'caminho / erro' },
 ];
 

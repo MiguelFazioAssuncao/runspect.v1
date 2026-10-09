@@ -7,12 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type instrumentation struct {
 	Mode     string   `json:"mode"`
 	Warnings []string `json:"warnings"`
+}
+
+func compilerCachePath() string {
+	path := os.Getenv("RUNSPECT_CPP_CACHE")
+	if path == "" {
+		return ""
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	return absolute
 }
 
 func clangRuntimePath(headerPath string) string {
@@ -138,21 +149,27 @@ func (r *CppRunner) instrument(dir, code string) (instrumentation, string) {
 			return instrumentation{}, "Falha ao preparar a visualização automática"
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), min(r.CompileTimeout, 10*time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), r.AnalysisTimeout)
 	defer cancel()
 	base := r.baseDir(dir)
 	args := []string{"python3", "-B", base + "/instrument_cpp.py", base + "/solution.cpp"}
+	if r.CompilerCachePath != "" {
+		args = append(args, "--cache", r.CompilerCachePath)
+	}
 	if r.ClangRuntimePath != "" {
-		runtimePath := r.ClangRuntimePath
-		if r.Sandbox {
-			runtimePath = "/clang-runtime"
-		}
-		args = append(args, "--runtime", runtimePath)
+		args = append(args, "--runtime", r.ClangRuntimePath)
 	}
 	argv := r.wrap(dir, true, r.compileLimits(), args)
+	// Analysis has a separate wall-clock and CPU budget from GCC compilation.
+	for i, arg := range argv {
+		if strings.HasPrefix(arg, "--cpu=") {
+			argv[i] = fmt.Sprintf("--cpu=%d", int(r.AnalysisTimeout.Seconds())+2)
+		}
+	}
 	if r.Sandbox && r.ClangRuntimePath != "" {
 		// Only trusted compiler dependencies are exposed, during analysis only.
-		argv = append(argv[:1], append([]string{"--ro-bind", r.ClangRuntimePath, "/clang-runtime"}, argv[1:]...)...)
+		// Keep trusted dependency paths identical to those embedded in a PCH.
+		argv = append(argv[:1], append([]string{"--ro-bind", r.ClangRuntimePath, r.ClangRuntimePath}, argv[1:]...)...)
 	}
 	cmd := r.command(ctx, dir, argv)
 	stdout := &limitedBuffer{max: 64 << 10}

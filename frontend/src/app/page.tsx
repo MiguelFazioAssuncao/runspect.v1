@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CircleHelp, Clock3, Code2, Network } from 'lucide-react';
-import { toCanvas } from 'html-to-image';
+import { flushSync } from 'react-dom';
+import { createRecordingCapture } from '@/lib/recordingCapture';
+import type { RecordingCapture } from '@/lib/recordingCapture';
 import { DocumentationPanel } from '@/components/DocumentationPanel';
 import type { DocumentationMethod } from '@/lib/documentation';
 import { CodeEditor } from '@/components/editor/CodeEditor';
@@ -23,7 +25,7 @@ import { convertToPureCpp } from '@/lib/codeConversion';
 import { exportJson } from '@/lib/export';
 import { captureSvgSnapshot, DEFAULT_SVG_OPTIONS } from '@/lib/svgExport';
 import type { SvgExportOptions, SvgSnapshot } from '@/lib/svgExport';
-import { boundedOperation, createRecordingPlan, recordVisualization, RecordingStopped, RECORDING_BG, waitForCapturePaint } from '@/lib/recording';
+import { boundedOperation, createRecordingPlan, recordVisualization, RecordingStopped, RECORDING_BG, throwIfRecordingAborted } from '@/lib/recording';
 import type { RecordingPlan, RecordingStatus } from '@/lib/recording';
 import { captureFontCSS } from '@/lib/captureFonts';
 import type { ExecutionResult, TraceStep } from '@/types/visualizer';
@@ -37,6 +39,7 @@ interface RecordingStage {
   steps: TraceStep[];
   layout: GraphLayout;
   runId: number;
+  index: number;
 }
 interface RecordingSession {
   stop: AbortController;
@@ -64,14 +67,16 @@ interface VisualizationStageProps {
   staticRender?: boolean;
 }
 
-function VisualizationStage({ player, layout, runId, hasSteps, graphRef, staticRender = false }: VisualizationStageProps) {
-  const graphAnalysis = useMemo(
-    () =>
-      player.graphState.nodes.length
-        ? analyzeGraph(player.graphState.nodes, player.graphState.edges, player.directed)
-        : null,
-    [player.graphState.nodes, player.graphState.edges, player.directed],
-  );
+const VisualizationStage = React.memo(function VisualizationStage({ player, layout, runId, hasSteps, graphRef, staticRender = false }: VisualizationStageProps) {
+  const analysisKey = JSON.stringify({
+    directed: player.directed,
+    nodes: player.graphState.nodes.map(node => ({ id: node.id, label: node.label })),
+    edges: player.graphState.edges.map(edge => ({ source: typeof edge.source === 'number' ? edge.source : edge.source.id, target: typeof edge.target === 'number' ? edge.target : edge.target.id, weight: edge.weight })),
+  });
+  const graphAnalysis = useMemo(() => {
+    const topology = JSON.parse(analysisKey) as { directed: boolean; nodes: PlayerState['graphState']['nodes']; edges: PlayerState['graphState']['edges'] };
+    return topology.nodes.length ? analyzeGraph(topology.nodes, topology.edges, topology.directed) : null;
+  }, [analysisKey]);
   const flowSummary = useMemo(() => {
     const message = [...player.logs].reverse().find((log) => /Fluxo:\s*\d+,\s*custo:\s*-?\d+/i.test(log));
     const match = message?.match(/Fluxo:\s*(\d+),\s*custo:\s*(-?\d+)/i);
@@ -134,7 +139,8 @@ function VisualizationStage({ player, layout, runId, hasSteps, graphRef, staticR
       <StructsPanel structs={player.structs} matrices={player.matrices} />
     </>
   );
-}
+}, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
+  (['graphState', 'vectors', 'vectorIssues', 'logs', 'structs', 'matrices', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
   const [code, setCode] = useState(DEFAULT_CPP_CODE);
@@ -166,7 +172,7 @@ export default function Home() {
   });
 
   const player = useVisualizerPlayer(steps, traceMode === 'automatic');
-  const recPlayer = useVisualizerPlayer(recordingStage?.steps ?? NO_STEPS);
+  const recPlayer = useVisualizerPlayer(recordingStage?.steps ?? NO_STEPS, false, recordingStage?.index);
 
   const graphRef = useRef<GraphCanvasHandle>(null);
   const visualizerRef = useRef<HTMLDivElement>(null);
@@ -176,7 +182,7 @@ export default function Home() {
   const runRequestRef = useRef(false);
   const visibleAreaRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     recPlayerRef.current = recPlayer;
   }, [recPlayer]);
 
@@ -303,7 +309,9 @@ export default function Home() {
   };
 
   const stopRecording = () => {
-    recordingSessionRef.current?.stop.abort(new RecordingStopped());
+    const session = recordingSessionRef.current;
+    if (recording.phase === 'finalizing') session?.dispose.abort(new RecordingStopped());
+    else session?.stop.abort(new RecordingStopped());
   };
 
   const startRecording = async () => {
@@ -327,37 +335,41 @@ export default function Home() {
 
     const session: RecordingSession = { stop: new AbortController(), dispose: new AbortController() };
     recordingSessionRef.current = session;
-    const ownsSession = () => recordingSessionRef.current === session && !session.dispose.signal.aborted;
+    const ownsSession = () => recordingSessionRef.current === session;
+    const activeSession = () => ownsSession() && !session.dispose.signal.aborted;
     player.setIsPlaying(false);
     setRecordingDownload(null);
     setRecording({ phase: 'preparing', message: 'Preparando gravação…', progress: 0 });
-    setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId });
-    let fontEmbedCSS: string | undefined;
+    let snapshotCapture: RecordingCapture | undefined;
 
     try {
+      flushSync(() => setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId, index: 0 }));
       const result = await recordVisualization({
         plan,
         stop: session.stop.signal,
         dispose: session.dispose.signal,
-        onStatus: (status) => { if (ownsSession()) setRecording(status); },
+        onStatus: (status) => { if (activeSession()) setRecording(status); },
         capture: async (step, signals) => {
-          recPlayerRef.current.seek(step);
-          await waitForCapturePaint(signals);
+          throwIfRecordingAborted(signals);
+          // Commit both the requested frame and the graph layout before reading DOM.
+          // No animation-frame wait: background tabs must be able to export too.
+          const renderStart = performance.now();
+          flushSync(() => setRecordingStage(current => current && ownsSession() ? { ...current, index: step } : current));
+          performance.measure('recording:render', { start: renderStart });
           const area = stageAreaRef.current;
-          if (!ownsSession() || !area || recPlayerRef.current.currentStepIndex !== step) {
+          if (!activeSession() || !area || recPlayerRef.current.currentStepIndex !== step) {
             throw new Error('Não foi possível preparar o quadro da gravação.');
           }
-          if (fontEmbedCSS === undefined) {
+          if (!snapshotCapture) {
             await boundedOperation(document.fonts.ready, 10_000, signals);
-            fontEmbedCSS = await boundedOperation(captureFontCSS(area, signals), 10_000, signals);
+            const fontEmbedCSS = await boundedOperation(captureFontCSS(area, signals), 10_000, signals);
+            throwIfRecordingAborted(signals);
+            snapshotCapture = createRecordingCapture(rect.width, rect.height, plan.width, plan.height, fontEmbedCSS);
           }
-          return toCanvas(area, {
-            pixelRatio: 1, backgroundColor: RECORDING_BG, cacheBust: false, fontEmbedCSS,
-            width: rect.width, height: rect.height, canvasWidth: plan.width, canvasHeight: plan.height,
-          });
+          return snapshotCapture.capture(area, signals);
         },
       });
-      if (!ownsSession()) return;
+      if (!activeSession()) return;
       if (!result) {
         setRecording({ phase: 'done', message: 'Gravação interrompida antes do primeiro quadro; nenhum arquivo foi criado.' });
         return;
@@ -375,13 +387,16 @@ export default function Home() {
       const codecNotice = result.codec === 'avc' ? '' : ` Codec ${result.codec.toUpperCase()}: a compatibilidade com outros aplicativos pode variar.`;
       setRecording({
         phase: 'done', progress: 1,
-        message: (result.partial ? 'Gravação interrompida. MP4 parcial disponível.' : 'Gravação concluída. MP4 disponível.') + codecNotice,
+        message: (result.partial ? 'Gravação interrompida. MP4 parcial disponível.' : 'Gravação concluída. MP4 disponível.') + codecNotice + ` Gerado em ${(result.metrics.totalMs / 1000).toFixed(1)} s.`,
       });
     } catch (error) {
       if (ownsSession()) {
-        setRecording({ phase: 'error', message: `Falha na gravação: ${error instanceof Error ? error.message : 'erro desconhecido'}` });
+        setRecording(error instanceof RecordingStopped
+          ? { phase: 'done', message: 'Gravação cancelada; nenhum arquivo novo foi criado.' }
+          : { phase: 'error', message: `Falha na gravação: ${error instanceof Error ? error.message : 'erro desconhecido'}` });
       }
     } finally {
+      snapshotCapture?.dispose();
       if (ownsSession()) {
         recordingSessionRef.current = null;
         setRecordingStage(null);
@@ -420,7 +435,7 @@ export default function Home() {
         setOutput(result.errors || result.error || `A execução falhou (HTTP ${response.status}).`);
       } else {
         const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
-        setOutput(`${result.output ? `${result.output}\n` : ''}Executado em ${result.time_ms} ms.${warnings}`);
+        setOutput(`${result.output ? `${result.output}\n` : ''}Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`);
       }
     } catch (error) {
       setHasError(true);
@@ -616,7 +631,7 @@ export default function Home() {
               isFullscreen={fullscreen}
               onToggleFullscreen={() => void toggleFullscreen()}
               canRecord={!isLoading && steps.length > 0 && hasVisualization}
-              isFinalizing={recording.phase === 'finalizing'}
+              isFinalizing={false}
               isRecording={isRecording}
               onStartRecording={() => void startRecording()}
               onStopRecording={stopRecording}
@@ -688,6 +703,9 @@ export default function Home() {
         >
           <div
             ref={stageAreaRef}
+            data-recording-step={recPlayer.currentStepIndex}
+            data-recording-event={recPlayer.eventIndex}
+            data-recording-line={recPlayer.line ?? ''}
             className="recording-area"
             style={{ background: RECORDING_BG, overflow: 'hidden' }}
           >

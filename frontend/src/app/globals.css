@@ -641,6 +641,7 @@ button:disabled { cursor: not-allowed; }
 
 .timeline-progress { flex: 1 1 0; min-width: 140px; display: flex; align-items: center; gap: 12px; }
 .timeline-step { color: #94a3b8; white-space: nowrap; font: 12px var(--font-geist-mono), monospace; }
+.timeline-completed { color: #22c55e; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .timeline-slider { width: 100%; height: 6px; accent-color: #3b82f6; cursor: pointer; }
 .timeline-slider:disabled { opacity: .3; cursor: not-allowed; }
 
@@ -653,17 +654,19 @@ button:disabled { cursor: not-allowed; }
   border: 1px solid #1e293b;
   border-radius: 8px;
 }
-.timeline-speed-btn {
-  padding: 2px 8px;
+.timeline-speed label { padding-left: 4px; color: #94a3b8; font-size: 11px; }
+.timeline-speed-select {
+  padding: 4px 6px;
   color: #94a3b8;
-  background: transparent;
+  background: #020617;
   border: 0;
   border-radius: 4px;
   font: 600 11px var(--font-geist-mono), monospace;
   transition: color .15s, background-color .15s;
 }
-.timeline-speed-btn:hover { color: #e2e8f0; }
-.timeline-speed-btn-active { color: #ffffff; background: #2563eb; box-shadow: 0 1px 2px rgba(0, 0, 0, .3); }
+.timeline-speed-select:hover { color: #e2e8f0; }
+.timeline-speed-select:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.timeline-speed-select:disabled { opacity: .4; }
 
 @media (max-width: 900px) {
   html, body {
@@ -748,7 +751,7 @@ button:disabled { cursor: not-allowed; }
   .timeline-speed { order: 2; }
   .timeline-progress { order: 3; flex: 1 1 100%; min-width: 0; }
   .timeline-btn { min-width: 40px; min-height: 40px; padding: 0; }
-  .timeline-speed-btn { min-width: 32px; min-height: 40px; padding: 0 6px; }
+  .timeline-speed-select { min-width: 64px; min-height: 40px; }
   .timeline-slider { height: 24px; }
 
   .workspace-footer {
@@ -769,7 +772,7 @@ button:disabled { cursor: not-allowed; }
   .app-shell { padding: 0 8px 24px; }
   .timeline-controls { padding: 8px; gap: 8px; }
   .timeline-btn { min-width: 36px; }
-  .timeline-speed-btn { min-width: 26px; padding: 0 4px; }
+  .timeline-speed label { display: none; }
 }
 
 .vector-panel {

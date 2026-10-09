@@ -86,6 +86,7 @@ export const VECTOR_EVENTS = [
   'VECTOR_RESET',
   'VECTOR_STEP',
   'VECTOR_RESULT',
+  'VECTOR_LABELS',
 ] as const;
 
 export type VectorEventName = (typeof VECTOR_EVENTS)[number];
@@ -93,6 +94,7 @@ export type VectorEventName = (typeof VECTOR_EVENTS)[number];
 export interface VectorItem {
   index: number;
   value: number;
+  displayValue?: string;
   state: VectorElementState;
 }
 

@@ -11,6 +11,7 @@ const originalIds = [
 const newIds = [
   'merge-sort', 'prefix-sum', 'sliding-window', 'fenwick-tree', 'lis',
   'zero-one-bfs', 'binary-exponentiation', 'euclidean-gcd',
+  'tuple-optional', 'bitset-switch',
 ];
 
 describe('catálogo de técnicas em C++ puro', () => {
