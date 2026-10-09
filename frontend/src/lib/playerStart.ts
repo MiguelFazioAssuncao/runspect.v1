@@ -29,7 +29,13 @@ export function playerStartFrame(
 ): number {
   if (!startAtVisualization) return 0;
   const firstEvent = steps.findIndex(isUserVisualization);
-  if (firstEvent < 0) return 0;
-  const frame = frames.findIndex((end) => end >= firstEvent);
+  const firstVariables = firstEvent < 0 ? steps.findIndex((step) =>
+    step.step_event === 'SET_STRUCT' && step.data?.name === 'Variáveis' &&
+    Array.isArray(step.data.items) && step.data.items.length > 0) : firstEvent;
+  if (firstVariables < 0) return 0;
+  const frame = frames.findIndex((end) => end >= firstVariables);
+  // Starting at the first data panel must never reveal output from statements
+  // the user has not played yet. Keep the initial frame if cout comes first.
+  if (frame >= 0 && steps.slice(0, frames[frame] + 1).some(step => step.step_event === 'PROGRAM_OUTPUT')) return 0;
   return frame < 0 ? 0 : frame;
 }

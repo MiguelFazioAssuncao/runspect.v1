@@ -379,7 +379,34 @@ button:disabled { cursor: not-allowed; }
 }
 .struct-empty { color: #475569; font-size: 11px; padding-top: 3px; }
 
+.graph-stage-data-only { overflow: auto; gap: 12px; }
+.structs-panel-primary {
+  max-height: none;
+  padding: 18px;
+  gap: 14px;
+  background: radial-gradient(circle at 50% 0%, rgba(37, 99, 235, .12), transparent 22rem), rgba(15, 23, 42, .82);
+}
+.structs-panel-solo { flex: 1 0 auto; min-height: 240px; }
+.struct-grid { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.structs-panel-primary .struct-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; align-items: start; }
+.structs-panel-primary .struct-row { min-width: 0; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid #26354a; border-radius: 10px; background: rgba(8, 15, 28, .5); }
+.structs-panel-primary .struct-name { flex-basis: auto; font-size: 12px; overflow-wrap: anywhere; }
+.structs-panel-primary .struct-items { gap: 10px; width: 100%; }
+.structs-panel-primary .struct-chip { padding: 8px 12px; font-size: 13px; overflow-wrap: anywhere; max-width: 100%; }
+.structs-panel-primary .struct-row-variables { flex-direction: row; align-items: center; padding: 0 0 4px; border: 0; background: transparent; }
+.structs-panel-primary .struct-row-variables > .struct-name { flex-shrink: 0; padding: 0; font-size: 10px; }
+.variable-card { flex: 0 1 auto; min-width: 100px; max-width: 100%; display: flex; flex-direction: row; align-items: baseline; gap: 16px; padding: 10px 14px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; }
+.variable-name { color: #94a3b8; font: 12px var(--font-geist-mono), monospace; overflow-wrap: anywhere; }
+.variable-value { color: #e2e8f0; font: 600 22px var(--font-geist-mono), monospace; overflow-wrap: anywhere; }
+.graph-stage-data-only .vector-panel-solo { flex: 0 0 auto; overflow: visible; }
+
 .matrix-table { border-collapse: collapse; font: 11px var(--font-geist-mono), monospace; }
+.matrix-card { flex-direction: column; }
+.matrix-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.matrix-size { flex-shrink: 0; padding: 3px 7px; border: 1px solid #26354a; border-radius: 5px; color: #7f93ad; font: 10px var(--font-geist-mono), monospace; }
+.matrix-scroll { width: 100%; min-width: 0; max-height: 320px; overflow: auto; padding: 2px; outline-offset: 3px; }
+.matrix-scroll:focus-visible { outline: 2px solid #60a5fa; }
+.matrix-table th { min-width: 24px; padding: 4px; color: #64748b; font-weight: 400; font-size: 10px; text-align: center; }
 .matrix-table td {
   min-width: 28px;
   padding: 2px 8px;
@@ -388,7 +415,10 @@ button:disabled { cursor: not-allowed; }
   background: #0f172a;
   border: 1px solid #334155;
 }
-.matrix-table tr:first-child td { color: #60a5fa; font-weight: 700; }
+.structs-panel-primary .matrix-table { margin: 0 auto; border-collapse: separate; border-spacing: 4px; font-size: 15px; }
+.structs-panel-primary .matrix-table td { min-width: 40px; height: 40px; padding: 6px 10px; border-color: #2d3d55; border-radius: 6px; color: #dce8f7; font-weight: 500; background: #111e32; }
+.structs-panel-primary .matrix-table th { min-width: 18px; }
+.structs-panel-primary .matrix-table td:hover { border-color: #60a5fa; background: #172b48; }
 
 .editor-header {
   display: flex;
@@ -1057,6 +1087,25 @@ button:disabled { cursor: not-allowed; }
 .visualizer-recording .timeline-controls { pointer-events: none; opacity: .6; }
 
 .code-editor-wrap { display: contents; }
+
+.program-console {
+  flex: 0 0 auto;
+  padding: 12px;
+  border: 1px solid var(--border, #223044);
+  border-radius: 12px;
+  background: #0d1523;
+}
+.program-console pre {
+  margin: 8px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #a7f3d0;
+  font: 12px/1.6 var(--font-geist-mono), monospace;
+}
+.program-input-warning { margin: 0; color: #fcd34d; font-size: 12px; line-height: 1.5; }
+.program-input-warning + * { margin-top: 8px; }
 
 @media (max-width: 900px) {
   .editor-column { min-height: 0; }

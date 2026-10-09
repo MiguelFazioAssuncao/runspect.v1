@@ -17,6 +17,10 @@ const startup = [
 ];
 
 describe('playerStartFrame', () => {
+  it('não pula impressões anteriores à primeira estrutura', () => {
+    const steps = [event('STEP'), event('PROGRAM_OUTPUT', { text: 'inicio\n' }), event('STEP'), event('VECTOR_INIT', { name: 'a', values: [1] }), event('STEP')];
+    expect(playerStartFrame(steps, frameEnds(steps), true)).toBe(0);
+  });
   it('inicia a visualização automática no primeiro quadro com vetor', () => {
     const steps = [
       ...startup,
@@ -56,8 +60,8 @@ describe('playerStartFrame', () => {
     expect(playerStartFrame(steps, frameEnds(steps), true)).toBe(2);
   });
 
-  it('retorna ao quadro zero quando existem apenas variáveis escalares', () => {
-    expect(playerStartFrame(startup, frameEnds(startup), true)).toBe(0);
+  it('abre o primeiro quadro com dados quando existem apenas variáveis escalares', () => {
+    expect(playerStartFrame(startup, frameEnds(startup), true)).toBe(1);
   });
 
   it('retorna ao quadro zero quando não há visualização', () => {

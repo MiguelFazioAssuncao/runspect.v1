@@ -11,9 +11,11 @@ import {
 import { createVectorReplay } from '@/lib/vectorReducer';
 import { playerStartFrame } from '@/lib/playerStart';
 import { startPlayback } from '@/lib/playback';
+import { programConsoleAt } from '@/lib/programConsole';
 
 export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = false, recordingIndex?: number) {
-  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const [position, setPosition] = useState({ steps, index: 0 });
+  const setCurrentStepIndex = useCallback((index: number) => setPosition({ steps, index }), [steps]);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [speed, setSpeed] = useState<number>(1);
   const playbackIndex = useRef(0);
@@ -24,6 +26,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     [steps, frames, startAtVisualization],
   );
   const totalSteps = frames.length;
+  const currentStepIndex = position.steps === steps ? position.index : initialStepIndex;
   const normalizedStepIndex = totalSteps === 0 ? 0 : Math.min(recordingIndex ?? currentStepIndex, totalSteps - 1);
   const eventIndex = frames[normalizedStepIndex] ?? 0;
   const eventLine = steps[eventIndex]?.data?.line;
@@ -35,12 +38,12 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     playbackIndex.current = index;
     setCurrentStepIndex(index);
     if (index >= totalSteps - 1) setIsPlaying(false);
-  }, [totalSteps]);
+  }, [totalSteps, setCurrentStepIndex]);
 
   const prevStep = useCallback(() => {
     playbackIndex.current = Math.max(0, playbackIndex.current - 1);
     setCurrentStepIndex(playbackIndex.current);
-  }, []);
+  }, [setCurrentStepIndex]);
 
   const seek = useCallback(
     (index: number) => {
@@ -48,7 +51,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
       setCurrentStepIndex(playbackIndex.current);
       if (playbackIndex.current >= totalSteps - 1) setIsPlaying(false);
     },
-    [totalSteps]
+    [totalSteps, setCurrentStepIndex]
   );
 
   const changePlaying = useCallback((playing: boolean) => {
@@ -57,10 +60,10 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
       setCurrentStepIndex(0);
     }
     setIsPlaying(playing && totalSteps > 1);
-  }, [normalizedStepIndex, totalSteps]);
+  }, [normalizedStepIndex, totalSteps, setCurrentStepIndex]);
 
   useEffect(() => {
-    if (!isPlaying || totalSteps < 2) return;
+    if (!isPlaying || totalSteps < 2 || position.steps !== steps) return;
     return startPlayback({
       speed, totalSteps,
       getIndex: () => playbackIndex.current,
@@ -70,7 +73,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
       },
       onFinish: () => setIsPlaying(false),
     });
-  }, [isPlaying, totalSteps, speed, steps]);
+  }, [isPlaying, totalSteps, speed, steps, position.steps, setCurrentStepIndex]);
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -80,7 +83,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     }, 0);
 
     return () => window.clearTimeout(resetTimer);
-  }, [steps, initialStepIndex]);
+  }, [steps, initialStepIndex, setCurrentStepIndex]);
 
   const directed = useMemo(() => isDirected(steps, eventIndex), [steps, eventIndex]);
   const weighted = useMemo(() => isWeighted(steps, eventIndex), [steps, eventIndex]);
@@ -96,6 +99,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
   const vectorState = useMemo(() => replayVectors(eventIndex), [replayVectors, eventIndex]);
 
   const caption = useMemo(() => frameCaption(steps, eventIndex), [steps, eventIndex]);
+  const programConsole = useMemo(() => programConsoleAt(steps, eventIndex), [steps, eventIndex]);
 
   const logs = useMemo(() => {
     const lines: string[] = [];
@@ -139,7 +143,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     eventIndex,
     line,
     caption,
-    isPlaying: isPlaying && normalizedStepIndex < totalSteps - 1,
+    isPlaying: isPlaying && position.steps === steps && normalizedStepIndex < totalSteps - 1,
     speed,
     totalSteps,
     graphState,
@@ -149,6 +153,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     vectors: vectorState.vectors,
     vectorIssues: vectorState.issues,
     logs,
+    programConsole,
     structs,
     matrices,
     setIsPlaying: changePlaying,
