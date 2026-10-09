@@ -2,14 +2,14 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CircleHelp, Clock3, Code2, Network } from 'lucide-react';
-import { getFontEmbedCSS, toCanvas } from 'html-to-image';
-import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
+import { toCanvas } from 'html-to-image';
 import { DocumentationPanel } from '@/components/DocumentationPanel';
 import type { DocumentationMethod } from '@/lib/documentation';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { GraphCanvas } from '@/components/visualizer/GraphCanvas';
 import type { GraphLayout, GraphCanvasHandle } from '@/components/visualizer/GraphCanvas';
 import { GraphToolbar } from '@/components/visualizer/GraphToolBar';
+import { SvgExportDialog } from '@/components/visualizer/SvgExportDialog';
 import { GraphLegend } from '@/components/visualizer/GraphLegend';
 import { TimelineControls } from '@/components/visualizer/TimelineControls';
 import { StructsPanel } from '@/components/visualizer/StructsPanel';
@@ -18,42 +18,30 @@ import { GraphAnalysisPanel } from '@/components/visualizer/GraphAnalysisPanel';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { useVisualizerPlayer } from '@/hooks/useVisualizerPlayer';
 import { examples } from '@/lib/examples';
+import { DEFAULT_CPP_CODE } from '@/lib/cppTemplate';
 import { convertToPureCpp } from '@/lib/codeConversion';
-import { exportJson, exportSvg } from '@/lib/export';
+import { exportJson } from '@/lib/export';
+import { captureSvgSnapshot, DEFAULT_SVG_OPTIONS } from '@/lib/svgExport';
+import type { SvgExportOptions, SvgSnapshot } from '@/lib/svgExport';
+import { boundedOperation, createRecordingPlan, recordVisualization, RecordingStopped, RECORDING_BG, waitForCapturePaint } from '@/lib/recording';
+import type { RecordingPlan, RecordingStatus } from '@/lib/recording';
+import { captureFontCSS } from '@/lib/captureFonts';
 import type { ExecutionResult, TraceStep } from '@/types/visualizer';
 
-const DEFAULT_CUSTOM_CODE = `#include <bits/stdc++.h>
-#include "visualizer.h"
-using namespace std;
-
-int main() {
-    return 0;
-}`;
-
-type RecordingPhase = 'idle' | 'recording' | 'finalizing' | 'done' | 'error';
 type PlayerState = ReturnType<typeof useVisualizerPlayer>;
-
-const RECORDING_BG = '#070a0f';
-const BASE_FRAME_MS = 900;
-const SETTLE_MS = 350;
-const RECORDING_FPS = 30;
-const RECORDING_BITRATE = 6_000_000;
-const KEYFRAME_EVERY = RECORDING_FPS * 2;
-const END_HOLD_MS = 1000;
-const MAX_ENCODE_QUEUE = 8;
-const MAX_RECORDING_WIDTH = 1920;
-const MAX_RECORDING_HEIGHT = 1080;
-const AVC_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.42E028'];
 const NO_STEPS: TraceStep[] = [];
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-const waitForPaint = async () => {
-  await nextFrame();
-  await nextFrame();
-  await sleep(SETTLE_MS);
-};
-const evenSize = (value: number) => Math.max(2, Math.floor(value / 2) * 2);
+interface RecordingStage {
+  w: number;
+  h: number;
+  plan: RecordingPlan;
+  steps: TraceStep[];
+  layout: GraphLayout;
+  runId: number;
+}
+interface RecordingSession {
+  stop: AbortController;
+  dispose: AbortController;
+}
 
 type ExampleItem = (typeof examples)[number];
 
@@ -67,86 +55,16 @@ const filterExamples = (query: string, category: string): ExampleItem[] => {
   });
 };
 
-type MuxerCodec = 'avc' | 'vp9' | 'av1';
-
-interface EncoderChoice {
-  config: VideoEncoderConfig;
-  muxerCodec: MuxerCodec;
-}
-
-const buildCandidates = (width: number, height: number): EncoderChoice[] => {
-  const base = { width, height, bitrate: RECORDING_BITRATE, framerate: RECORDING_FPS };
-  const list: EncoderChoice[] = [];
-  for (const hardwareAcceleration of ['no-preference', 'prefer-software'] as const) {
-    for (const codec of AVC_CODECS) {
-      list.push({
-        muxerCodec: 'avc',
-        config: { ...base, codec, hardwareAcceleration, avc: { format: 'avc' } },
-      });
-    }
-  }
-  list.push({ muxerCodec: 'vp9', config: { ...base, codec: 'vp09.00.40.08' } });
-  list.push({ muxerCodec: 'av1', config: { ...base, codec: 'av01.0.08M.08' } });
-  return list;
-};
-
-const probeEncoder = async (config: VideoEncoderConfig, width: number, height: number) => {
-  let failed = false;
-  let probe: VideoEncoder | null = null;
-  try {
-    const support = await VideoEncoder.isConfigSupported(config);
-    if (!support.supported) return false;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return false;
-    ctx.fillStyle = RECORDING_BG;
-    ctx.fillRect(0, 0, width, height);
-
-    probe = new VideoEncoder({
-      output: () => undefined,
-      error: () => {
-        failed = true;
-      },
-    });
-    probe.configure(config);
-    const frame = new VideoFrame(canvas, { timestamp: 0 });
-    probe.encode(frame, { keyFrame: true });
-    frame.close();
-    await probe.flush();
-    return !failed;
-  } catch {
-    return false;
-  } finally {
-    const pending = probe as VideoEncoder | null;
-    if (pending && pending.state !== 'closed') {
-      try {
-        pending.close();
-      } catch {
-        failed = true;
-      }
-    }
-  }
-};
-
-const pickEncoder = async (width: number, height: number) => {
-  for (const candidate of buildCandidates(width, height)) {
-    if (await probeEncoder(candidate.config, width, height)) return candidate;
-  }
-  return null;
-};
-
 interface VisualizationStageProps {
   player: PlayerState;
   layout: GraphLayout;
   runId: number;
   hasSteps: boolean;
   graphRef?: React.Ref<GraphCanvasHandle>;
+  staticRender?: boolean;
 }
 
-function VisualizationStage({ player, layout, runId, hasSteps, graphRef }: VisualizationStageProps) {
+function VisualizationStage({ player, layout, runId, hasSteps, graphRef, staticRender = false }: VisualizationStageProps) {
   const graphAnalysis = useMemo(
     () =>
       player.graphState.nodes.length
@@ -167,6 +85,7 @@ function VisualizationStage({ player, layout, runId, hasSteps, graphRef }: Visua
 
   return (
     <>
+      {!hasGraph && player.caption && <div className="frame-caption frame-caption-inline" role="status">{player.caption}</div>}
       <div className={`graph-stage ${hasVectors && !hasGraph ? 'graph-stage-vector-only' : ''}`}>
         {hasGraph && (
           <div className="graph-panel">
@@ -178,6 +97,7 @@ function VisualizationStage({ player, layout, runId, hasSteps, graphRef }: Visua
               directed={player.directed}
               weighted={player.weighted}
               layout={layout}
+              staticRender={staticRender}
               bridgeEdgeIndexes={graphAnalysis?.bridgeEdgeIndexes}
               articulationNodeIds={graphAnalysis?.articulationNodeIds}
               stronglyConnectedComponentByNode={graphAnalysis?.stronglyConnectedComponentByNode}
@@ -210,15 +130,15 @@ function VisualizationStage({ player, layout, runId, hasSteps, graphRef }: Visua
         )}
         {hasGraph && <GraphLegend />}
       </div>
-      <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />
+      {!staticRender && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
       <StructsPanel structs={player.structs} matrices={player.matrices} />
     </>
   );
 }
 
 export default function Home() {
-  const [code, setCode] = useState(DEFAULT_CUSTOM_CODE);
-  const [customCode, setCustomCode] = useState(DEFAULT_CUSTOM_CODE);
+  const [code, setCode] = useState(DEFAULT_CPP_CODE);
+  const [customCode, setCustomCode] = useState(DEFAULT_CPP_CODE);
   const [stdin, setStdin] = useState(examples[0].stdin ?? '');
   const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
   const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
@@ -230,28 +150,37 @@ export default function Home() {
   const [layout, setLayout] = useState<GraphLayout>('force');
   const [output, setOutput] = useState('Aguardando uma execução...');
   const [hasError, setHasError] = useState(false);
+  const [traceMode, setTraceMode] = useState<ExecutionResult['trace_mode']>();
   const [isLoading, setIsLoading] = useState(false);
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [fullscreen, setFullscreen] = useState(false);
-  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
-  const [recording, setRecording] = useState<{ phase: RecordingPhase; message: string }>({
+  const [recordingStage, setRecordingStage] = useState<RecordingStage | null>(null);
+  const [svgSnapshot, setSvgSnapshot] = useState<SvgSnapshot | null>(null);
+  const [svgOptions, setSvgOptions] = useState<SvgExportOptions>(DEFAULT_SVG_OPTIONS);
+  const [svgExportError, setSvgExportError] = useState('');
+  const [recordingDownload, setRecordingDownload] = useState<{ url: string; filename: string } | null>(null);
+  const [recording, setRecording] = useState<RecordingStatus>({
     phase: 'idle',
     message: '',
   });
 
-  const player = useVisualizerPlayer(steps);
-  const recPlayer = useVisualizerPlayer(stageSize ? steps : NO_STEPS);
+  const player = useVisualizerPlayer(steps, traceMode === 'automatic');
+  const recPlayer = useVisualizerPlayer(recordingStage?.steps ?? NO_STEPS);
 
   const graphRef = useRef<GraphCanvasHandle>(null);
   const visualizerRef = useRef<HTMLDivElement>(null);
   const stageAreaRef = useRef<HTMLDivElement>(null);
   const recPlayerRef = useRef<PlayerState>(recPlayer);
-  const cancelRecordingRef = useRef(false);
+  const recordingSessionRef = useRef<RecordingSession | null>(null);
+  const runRequestRef = useRef(false);
+  const visibleAreaRef = useRef<HTMLDivElement>(null);
 
-  recPlayerRef.current = recPlayer;
+  useEffect(() => {
+    recPlayerRef.current = recPlayer;
+  }, [recPlayer]);
 
-  const isRecording = recording.phase === 'recording' || recording.phase === 'finalizing';
+  const isRecording = recording.phase === 'preparing' || recording.phase === 'recording' || recording.phase === 'finalizing';
 
   const categories = useMemo(
     () => ['todas', ...new Set(examples.map((example) => example.category ?? 'Outros'))],
@@ -338,16 +267,17 @@ export default function Home() {
   }, [fullscreen]);
 
   useEffect(() => {
-    if (recording.phase !== 'done') return;
-    const timer = window.setTimeout(() => setRecording({ phase: 'idle', message: '' }), 6000);
-    return () => window.clearTimeout(timer);
-  }, [recording.phase]);
+    return () => {
+      recordingSessionRef.current?.dispose.abort(new Error('A página de gravação foi fechada.'));
+      recordingSessionRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
-      cancelRecordingRef.current = true;
+      if (recordingDownload) URL.revokeObjectURL(recordingDownload.url);
     };
-  }, []);
+  }, [recordingDownload]);
 
   const toggleFullscreen = async () => {
     const visualizer = visualizerRef.current;
@@ -373,187 +303,95 @@ export default function Home() {
   };
 
   const stopRecording = () => {
-    cancelRecordingRef.current = true;
+    recordingSessionRef.current?.stop.abort(new RecordingStopped());
   };
 
   const startRecording = async () => {
-    if (isRecording) return;
-    const fail = (message: string) => setRecording({ phase: 'error', message });
-
+    if (recordingSessionRef.current || runRequestRef.current) return;
     if (steps.length === 0 || player.totalSteps === 0 || !hasVisualization) {
-      fail('Execute um algoritmo antes de gravar a visualização.');
+      setRecording({ phase: 'error', message: 'Execute um algoritmo antes de gravar a visualização.' });
       return;
     }
-    if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') {
-      fail('Seu navegador não suporta gravação em MP4 (WebCodecs). Use Chrome, Edge ou Safari atualizados.');
+    const rect = visibleAreaRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      setRecording({ phase: 'error', message: 'A área de visualização ainda não está pronta.' });
+      return;
+    }
+    let plan: RecordingPlan;
+    try {
+      plan = createRecordingPlan(player.totalSteps, player.speed, rect.width, rect.height, window.devicePixelRatio || 1);
+    } catch (error) {
+      setRecording({ phase: 'error', message: error instanceof Error ? error.message : 'Não foi possível preparar a gravação.' });
       return;
     }
 
-    const total = player.totalSteps;
-    const frameMs = BASE_FRAME_MS / Math.max(0.25, player.speed);
-    const framesPerStep = Math.max(1, Math.round((frameMs / 1000) * RECORDING_FPS));
-    const screenW = window.screen.width || window.innerWidth;
-    const screenH = window.screen.height || window.innerHeight;
-    const ratio = Math.min(1, MAX_RECORDING_WIDTH / screenW, MAX_RECORDING_HEIGHT / screenH);
-    const width = evenSize(screenW * ratio);
-    const height = evenSize(screenH * ratio);
-
-    cancelRecordingRef.current = false;
+    const session: RecordingSession = { stop: new AbortController(), dispose: new AbortController() };
+    recordingSessionRef.current = session;
+    const ownsSession = () => recordingSessionRef.current === session && !session.dispose.signal.aborted;
     player.setIsPlaying(false);
-    setRecording({ phase: 'recording', message: 'Preparando gravação…' });
-    setStageSize({ w: width, h: height });
-
-    let encoder: VideoEncoder | null = null;
-    let encoderError: Error | null = null;
-    let renderError: string | null = null;
-    let frameIndex = 0;
+    setRecordingDownload(null);
+    setRecording({ phase: 'preparing', message: 'Preparando gravação…', progress: 0 });
+    setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId });
+    let fontEmbedCSS: string | undefined;
 
     try {
-      await waitForPaint();
-      const area = stageAreaRef.current;
-      if (!area) {
-        fail('Não foi possível preparar a área de gravação.');
-        return;
-      }
-
-      setRecording({ phase: 'recording', message: 'Verificando encoder de vídeo…' });
-      const choice = await pickEncoder(width, height);
-      if (!choice) {
-        fail('Nenhum encoder de vídeo compatível foi encontrado neste navegador. Use Chrome ou Edge.');
-        return;
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        fail('Não foi possível criar o canvas de gravação.');
-        return;
-      }
-      ctx.fillStyle = RECORDING_BG;
-      ctx.fillRect(0, 0, width, height);
-
-      const target = new ArrayBufferTarget();
-      const muxer = new Muxer({
-        target,
-        video: { codec: choice.muxerCodec, width, height, frameRate: RECORDING_FPS },
-        fastStart: 'in-memory',
-      });
-
-      const activeEncoder = new VideoEncoder({
-        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-        error: (e) => {
-          encoderError = e;
+      const result = await recordVisualization({
+        plan,
+        stop: session.stop.signal,
+        dispose: session.dispose.signal,
+        onStatus: (status) => { if (ownsSession()) setRecording(status); },
+        capture: async (step, signals) => {
+          recPlayerRef.current.seek(step);
+          await waitForCapturePaint(signals);
+          const area = stageAreaRef.current;
+          if (!ownsSession() || !area || recPlayerRef.current.currentStepIndex !== step) {
+            throw new Error('Não foi possível preparar o quadro da gravação.');
+          }
+          if (fontEmbedCSS === undefined) {
+            await boundedOperation(document.fonts.ready, 10_000, signals);
+            fontEmbedCSS = await boundedOperation(captureFontCSS(area, signals), 10_000, signals);
+          }
+          return toCanvas(area, {
+            pixelRatio: 1, backgroundColor: RECORDING_BG, cacheBust: false, fontEmbedCSS,
+            width: rect.width, height: rect.height, canvasWidth: plan.width, canvasHeight: plan.height,
+          });
         },
       });
-      encoder = activeEncoder;
-      activeEncoder.configure(choice.config);
-
-      const pushFrame = async () => {
-        const frame = new VideoFrame(canvas, {
-          timestamp: Math.round((frameIndex * 1_000_000) / RECORDING_FPS),
-          duration: Math.round(1_000_000 / RECORDING_FPS),
-        });
-        activeEncoder.encode(frame, { keyFrame: frameIndex % KEYFRAME_EVERY === 0 });
-        frame.close();
-        frameIndex++;
-        while (activeEncoder.encodeQueueSize > MAX_ENCODE_QUEUE && !encoderError) await sleep(5);
-      };
-
-      let fontEmbedCSS: string | undefined;
-      try {
-        fontEmbedCSS = await getFontEmbedCSS(area);
-      } catch {
-        fontEmbedCSS = undefined;
-      }
-      const options = { pixelRatio: 1, backgroundColor: RECORDING_BG, cacheBust: false, fontEmbedCSS };
-
-      recPlayerRef.current.seek(0);
-      await waitForPaint();
-
-      for (let i = 0; i < total; i++) {
-        if (cancelRecordingRef.current || encoderError) break;
-        setRecording({ phase: 'recording', message: `Gravando… passo ${i + 1} de ${total}` });
-
-        if (i > 0) {
-          recPlayerRef.current.seek(i);
-          await waitForPaint();
-        }
-
-        let rendered: HTMLCanvasElement;
-        try {
-          if (i === 0) await toCanvas(area, options);
-          rendered = await toCanvas(area, options);
-        } catch (error) {
-          renderError = `Erro ao renderizar o passo ${i + 1}: ${error instanceof Error ? error.message : 'falha desconhecida'}`;
-          break;
-        }
-
-        ctx.fillStyle = RECORDING_BG;
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(rendered, 0, 0, width, height);
-
-        for (let k = 0; k < framesPerStep; k++) await pushFrame();
-      }
-
-      if (frameIndex > 0 && !renderError && !encoderError) {
-        const holdFrames = Math.round((END_HOLD_MS / 1000) * RECORDING_FPS);
-        for (let k = 0; k < holdFrames; k++) await pushFrame();
-      }
-
-      setRecording({ phase: 'finalizing', message: 'Finalizando vídeo…' });
-      if (!encoderError) await activeEncoder.flush();
-      if (activeEncoder.state !== 'closed') activeEncoder.close();
-
-      if (encoderError) {
-        fail(`Falha no encoder: ${(encoderError as Error).message}`);
+      if (!ownsSession()) return;
+      if (!result) {
+        setRecording({ phase: 'done', message: 'Gravação interrompida antes do primeiro quadro; nenhum arquivo foi criado.' });
         return;
       }
-      if (renderError) {
-        fail(renderError);
-        return;
-      }
-      if (frameIndex === 0) {
-        fail('Nenhum frame foi gravado.');
-        return;
-      }
-
-      muxer.finalize();
-      const blob = new Blob([target.buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(result.blob);
+      const filename = `runspect-visualizacao-${Date.now()}.mp4`;
+      setRecordingDownload({ url, filename });
       const link = document.createElement('a');
       link.href = url;
-      link.download = `runspect-visualizacao-${Date.now()}.mp4`;
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-
-      const codecNotice =
-        choice.muxerCodec === 'avc'
-          ? ''
-          : ` Codec ${choice.muxerCodec.toUpperCase()} usado (H.264 indisponível); algumas redes sociais podem não aceitar. Use Chrome ou Edge para H.264.`;
+      link.download = filename;
+      document.body.appendChild(link);
+      try { link.click(); } catch {
+        // The explicit download link remains available if auto-download is blocked.
+      } finally { link.remove(); }
+      const codecNotice = result.codec === 'avc' ? '' : ` Codec ${result.codec.toUpperCase()}: a compatibilidade com outros aplicativos pode variar.`;
       setRecording({
-        phase: 'done',
-        message:
-          (cancelRecordingRef.current
-            ? 'Gravação interrompida. Arquivo parcial baixado (MP4).'
-            : 'Gravação concluída. Download do MP4 iniciado.') + codecNotice,
+        phase: 'done', progress: 1,
+        message: (result.partial ? 'Gravação interrompida. MP4 parcial disponível.' : 'Gravação concluída. MP4 disponível.') + codecNotice,
       });
     } catch (error) {
-      setRecording({
-        phase: 'error',
-        message: `Falha na gravação: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
-      });
+      if (ownsSession()) {
+        setRecording({ phase: 'error', message: `Falha na gravação: ${error instanceof Error ? error.message : 'erro desconhecido'}` });
+      }
     } finally {
-      const pending = encoder as VideoEncoder | null;
-      if (pending && pending.state !== 'closed') pending.close();
-      cancelRecordingRef.current = false;
-      setStageSize(null);
+      if (ownsSession()) {
+        recordingSessionRef.current = null;
+        setRecordingStage(null);
+      }
     }
   };
 
   const runCode = async (source = code, input = stdin) => {
-    if (isRecording) return;
+    if (recordingSessionRef.current || runRequestRef.current) return;
+    runRequestRef.current = true;
     setIsLoading(true);
     setHasError(false);
     setOutput('Compilando e executando...');
@@ -575,12 +413,14 @@ export default function Home() {
         );
       }
       setSteps(result.steps ?? []);
+      setTraceMode(result.trace_mode);
       setRunId((id) => id + 1);
       if (!response.ok || !result.success) {
         setHasError(true);
         setOutput(result.errors || result.error || `A execução falhou (HTTP ${response.status}).`);
       } else {
-        setOutput(`${result.output ? `${result.output}\n` : ''}Executado em ${result.time_ms} ms.`);
+        const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
+        setOutput(`${result.output ? `${result.output}\n` : ''}Executado em ${result.time_ms} ms.${warnings}`);
       }
     } catch (error) {
       setHasError(true);
@@ -591,6 +431,7 @@ export default function Home() {
         setOutput(error instanceof Error ? error.message : 'Não foi possível executar o código.');
       }
     } finally {
+      runRequestRef.current = false;
       setIsLoading(false);
     }
   };
@@ -605,7 +446,16 @@ export default function Home() {
   };
 
   const handleExportSvg = () => {
-    exportSvg(document.querySelector<SVGSVGElement>('.graph-panel svg'));
+    if (recordingSessionRef.current || runRequestRef.current) return;
+    try {
+      player.setIsPlaying(false);
+      const title = `Runspect · passo ${player.currentStepIndex + 1} de ${player.totalSteps}`;
+      const summary = `${player.graphState.nodes.length} vértices · ${player.graphState.edges.length} arestas · ${player.directed ? 'direcionado' : 'não direcionado'}`;
+      setSvgSnapshot(captureSvgSnapshot(graphRef.current?.getSvgElement() ?? null, title, [summary, player.caption].filter(Boolean).join(' — ')));
+      setSvgExportError('');
+    } catch (error) {
+      setSvgExportError(error instanceof Error ? error.message : 'Não foi possível preparar a exportação SVG.');
+    }
   };
 
   return (
@@ -692,6 +542,7 @@ export default function Home() {
           })()}
           {editorTab === 'custom' && (
             <div className="editor-actions">
+              <span className="text-xs text-slate-400">Cole C++17 comum para visualizar a execução.</span>
               <button
                 className="convert-button"
                 onClick={() => {
@@ -751,6 +602,7 @@ export default function Home() {
         >
           <div className="visualizer-header">
             <div className="panel-label"><Network className="h-3.5 w-3.5" /> visualização</div>
+            {traceMode === 'automatic' && <span className="text-xs text-slate-400">automática</span>}
             <GraphToolbar
               layout={layout}
               onLayoutChange={setLayout}
@@ -763,21 +615,26 @@ export default function Home() {
               onFit={() => graphRef.current?.fit()}
               isFullscreen={fullscreen}
               onToggleFullscreen={() => void toggleFullscreen()}
-              canRecord={steps.length > 0 && hasVisualization}
+              canRecord={!isLoading && steps.length > 0 && hasVisualization}
+              isFinalizing={recording.phase === 'finalizing'}
               isRecording={isRecording}
               onStartRecording={() => void startRecording()}
               onStopRecording={stopRecording}
             />
           </div>
 
+          {svgExportError && <p className="svg-export-error" role="alert">{svgExportError}</p>}
+
           {recording.phase !== 'idle' && (
             <div className={`recording-status recording-status-${recording.phase}`} role="status">
               {recording.phase === 'recording' && <span className="recording-dot" />}
-              {recording.message}
+              <span>{recording.message}</span>
+              {recording.progress !== undefined && isRecording && <progress value={recording.progress} max={1} aria-label="Progresso da gravação" />}
+              {recordingDownload && <a className="toolbar-button" href={recordingDownload.url} download={recordingDownload.filename}>Baixar MP4</a>}
             </div>
           )}
 
-          <div className="recording-area">
+          <div ref={visibleAreaRef} className="recording-area">
             <VisualizationStage
               player={player}
               layout={layout}
@@ -788,6 +645,7 @@ export default function Home() {
           </div>
 
           <TimelineControls
+            disabled={isRecording}
             currentStep={player.currentStepIndex}
             totalSteps={player.totalSteps}
             isPlaying={player.isPlaying}
@@ -798,6 +656,7 @@ export default function Home() {
             onSeek={player.seek}
             onSpeedChange={player.setSpeed}
           />
+          {svgSnapshot && <SvgExportDialog snapshot={svgSnapshot} options={svgOptions} onOptionsChange={setSvgOptions} filename={`runspect-grafo-passo-${player.currentStepIndex + 1}.svg`} onClose={() => setSvgSnapshot(null)} />}
         </div>
       </section>
 
@@ -809,17 +668,18 @@ export default function Home() {
       </footer>
       {showDocumentation && <DocumentationPanel onClose={() => setShowDocumentation(false)} onLoad={loadDocumentationExample} />}
 
-      {stageSize && (
+      {recordingStage && (
         <div
           aria-hidden="true"
-          className="visualizer-column visualizer-fullscreen"
+          inert
+          className="visualizer-column visualizer-fullscreen recording-stage"
           style={{
             position: 'fixed',
             inset: 'auto',
             left: -100000,
             top: 0,
-            width: stageSize.w,
-            height: stageSize.h,
+            width: recordingStage.w,
+            height: recordingStage.h,
             padding: 0,
             gap: 0,
             zIndex: -1,
@@ -829,13 +689,14 @@ export default function Home() {
           <div
             ref={stageAreaRef}
             className="recording-area"
-            style={{ padding: '16px 24px 20px', background: RECORDING_BG }}
+            style={{ background: RECORDING_BG, overflow: 'hidden' }}
           >
             <VisualizationStage
               player={recPlayer}
-              layout={layout}
-              runId={runId}
-              hasSteps={steps.length > 0}
+              layout={recordingStage.layout}
+              runId={recordingStage.runId}
+              hasSteps={recordingStage.steps.length > 0}
+              staticRender
             />
           </div>
         </div>

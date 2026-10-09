@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { editor as MonacoEditor } from 'monaco-editor';
+import { Settings2 } from 'lucide-react';
+import { useEditorSettings } from '@/hooks/useEditorSettings';
+import { ConfiguredMonacoEditor } from './ConfiguredMonacoEditor';
 
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+const EditorSettingsDialog = dynamic(() => import('./EditorSettingsDialog').then((module) => module.EditorSettingsDialog), { ssr: false });
 
 interface CodeEditorProps {
   code: string;
@@ -27,6 +30,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   logs = [],
   activeLine = null,
 }) => {
+  const { settings, status, updateSettings, resetSettings } = useEditorSettings();
+  const [showSettings, setShowSettings] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
   const activeLineRef = useRef<number | null>(activeLine);
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
@@ -82,27 +87,26 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     <div className="flex flex-col flex-1 min-h-0 h-full w-full bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
       <div className="flex items-center justify-between px-4 py-2 bg-slate-950 border-b border-slate-800">
         <span className="text-xs font-mono font-semibold text-slate-400">solution.cpp</span>
-        <button
-          onClick={onRun}
-          disabled={isLoading}
-          className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors disabled:opacity-50"
-        >
-          {isLoading ? 'Executando...' : 'Executar Algoritmo'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setShowSettings(true)} title="Personalizar editor" aria-label="Personalizar editor" aria-haspopup="dialog" className="editor-settings-trigger"><Settings2 size={15} /></button>
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={isLoading}
+            className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            {isLoading ? 'Executando...' : 'Executar Algoritmo'}
+          </button>
+        </div>
       </div>
       <div className="flex-1 min-h-0">
-        <Editor
+        <ConfiguredMonacoEditor
+          settings={settings}
           height="100%"
           defaultLanguage="cpp"
-          theme="vs-dark"
           value={code}
           onChange={(val) => setCode(val || '')}
           onMount={handleEditorMount}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            automaticLayout: true,
-          }}
         />
       </div>
       {output && (
@@ -118,6 +122,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           </pre>
         </section>
       )}
+      {showSettings && <EditorSettingsDialog settings={settings} status={status} onChange={updateSettings} onReset={resetSettings} onClose={() => setShowSettings(false)} />}
     </div>
   );
 };

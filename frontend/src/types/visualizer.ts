@@ -38,6 +38,8 @@ export interface ExecutionResult {
   output?: string;
   errors?: string;
   time_ms: number;
+  trace_mode?: 'automatic' | 'manual' | 'unavailable';
+  trace_warnings?: string[];
 }
 
 export interface GraphNode extends d3.SimulationNodeDatum {

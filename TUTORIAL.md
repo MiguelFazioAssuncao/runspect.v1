@@ -26,7 +26,8 @@ O fluxo completo é:
 2. `Home.runCode` envia `POST /api/run`.
 3. O rewrite do Next encaminha a requisição para `127.0.0.1:8080`.
 4. O servidor chama `CppRunner.Run`.
-5. O programa C++ inclui `visualizer.h` e imprime eventos JSON.
+5. O backend analisa C++ comum com Clang e insere observações automáticas;
+   código que já usa `viz::` mantém seus eventos manuais.
 6. O backend coleta os eventos em `ExecutionResult`.
 7. `useVisualizerPlayer` reconstrói o estado até o passo selecionado.
 8. `GraphCanvas`, `StructsPanel` e o terminal exibem o resultado.
@@ -49,6 +50,8 @@ Arquivos principais:
 - Go 1.24.4 ou compatível.
 - Node.js e npm.
 - `g++` com suporte a C++17.
+- `bubblewrap`, `util-linux` e `python3-clang` no Linux. O Dockerfile já inclui
+  estas dependências.
 
 ### Terminal 1: backend
 
@@ -78,9 +81,22 @@ Abra `http://localhost:3000`. O rewrite configurado em
 [`frontend/next.config.ts`](./frontend/next.config.ts) faz o frontend
 encaminhar `/api/*` para o backend.
 
-## 3. Escrevendo um algoritmo visualizável
+## 3. Visualização automática e métodos manuais
 
-Todo algoritmo deve incluir o header e pode usar a namespace `viz`:
+Você pode colar C++17 comum, sem `visualizer.h` e sem chamadas `viz::`, e
+executá-lo. O backend observa estruturas e operações reconhecidas, gerando
+passos para o mesmo player. Strings aparecem como códigos de caracteres,
+vetores mostram escritas e trocas, e os elementos consultados recebem
+destaques. Variáveis e matrizes aparecem nos painéis de estruturas.
+
+Listas de adjacência e listas de arestas podem gerar grafos automaticamente.
+Essa interpretação é inferida a partir dos tipos, nomes e operações; não há
+uma interpretação visual única para todo código C++. Consulte os formatos,
+dependências e limites em
+[Visualização automática](./backend/AUTOMATIC_VISUALIZATION.md).
+
+Para controlar cada destaque, legenda e frame manualmente, inclua o header
+e use a namespace `viz`:
 
 ```cpp
 #include <bits/stdc++.h>

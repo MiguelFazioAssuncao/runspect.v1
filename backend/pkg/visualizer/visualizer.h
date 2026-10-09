@@ -9,6 +9,15 @@
 
 namespace viz {
 
+inline std::ostream*& event_stream_pointer() {
+    static std::ostream* stream = &std::cout;
+    return stream;
+}
+
+inline std::ostream& event_stream() {
+    return *event_stream_pointer();
+}
+
 inline std::string escape_json(const std::string& value) {
     std::string escaped;
     escaped.reserve(value.size());
@@ -19,54 +28,62 @@ inline std::string escape_json(const std::string& value) {
             case '\n': escaped += "\\n"; break;
             case '\r': escaped += "\\r"; break;
             case '\t': escaped += "\\t"; break;
-            default: escaped += character;
+            default:
+                if (static_cast<unsigned char>(character) < 0x20) {
+                    const char* hex = "0123456789abcdef";
+                    escaped += "\\u00";
+                    escaped += hex[(static_cast<unsigned char>(character) >> 4) & 15];
+                    escaped += hex[static_cast<unsigned char>(character) & 15];
+                } else {
+                    escaped += character;
+                }
         }
     }
     return escaped;
 }
 
 inline void set_directed(bool directed, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_DIRECTED\",\"directed\":"
+    event_stream() << "{\"step_event\":\"SET_DIRECTED\",\"directed\":"
               << (directed ? "true" : "false") << ",\"line\":" << line << "}\n";
 }
 
 inline void set_weighted(bool weighted, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_WEIGHTED\",\"weighted\":"
+    event_stream() << "{\"step_event\":\"SET_WEIGHTED\",\"weighted\":"
               << (weighted ? "true" : "false") << ",\"line\":" << line << "}\n";
 }
 
 inline void add_node(int id, const std::string& label = "", int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"ADD_NODE\",\"id\":" << id
+    event_stream() << "{\"step_event\":\"ADD_NODE\",\"id\":" << id
               << ",\"label\":\"" << escape_json(label) << "\",\"line\":" << line << "}\n";
 }
 
 inline void add_edge(int u, int v, int weight = 1, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"ADD_EDGE\",\"u\":" << u
+    event_stream() << "{\"step_event\":\"ADD_EDGE\",\"u\":" << u
               << ",\"v\":" << v << ",\"weight\":" << weight << ",\"line\":" << line << "}\n";
 }
 
 inline void remove_node(int id, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"REMOVE_NODE\",\"id\":" << id << ",\"line\":" << line << "}\n";
+    event_stream() << "{\"step_event\":\"REMOVE_NODE\",\"id\":" << id << ",\"line\":" << line << "}\n";
 }
 
 inline void remove_edge(int u, int v, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"REMOVE_EDGE\",\"u\":" << u
+    event_stream() << "{\"step_event\":\"REMOVE_EDGE\",\"u\":" << u
               << ",\"v\":" << v << ",\"line\":" << line << "}\n";
 }
 
 inline void set_weight(int u, int v, int weight, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_WEIGHT\",\"u\":" << u
+    event_stream() << "{\"step_event\":\"SET_WEIGHT\",\"u\":" << u
               << ",\"v\":" << v << ",\"weight\":" << weight << ",\"line\":" << line << "}\n";
 }
 
 inline void highlight(int id, const std::string& color = "red", int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"HIGHLIGHT\",\"id\":" << id
+    event_stream() << "{\"step_event\":\"HIGHLIGHT\",\"id\":" << id
               << ",\"color\":\"" << escape_json(color) << "\",\"line\":" << line << "}\n";
 }
 
 inline void highlight_edge(int u, int v, const std::string& color = "red",
                            int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"HIGHLIGHT_EDGE\",\"u\":" << u
+    event_stream() << "{\"step_event\":\"HIGHLIGHT_EDGE\",\"u\":" << u
               << ",\"v\":" << v
               << ",\"color\":\"" << escape_json(color) << "\",\"line\":" << line << "}\n";
 }
@@ -80,37 +97,37 @@ inline void highlight_path(const std::vector<int>& path, const std::string& colo
 }
 
 inline void reset_colors(int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"RESET_COLORS\",\"line\":" << line << "}\n";
+    event_stream() << "{\"step_event\":\"RESET_COLORS\",\"line\":" << line << "}\n";
 }
 
 inline void set_label(int id, const std::string& label, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_LABEL\",\"id\":" << id
+    event_stream() << "{\"step_event\":\"SET_LABEL\",\"id\":" << id
               << ",\"label\":\"" << escape_json(label) << "\",\"line\":" << line << "}\n";
 }
 
 inline void set_color(int id, const std::string& color, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_COLOR\",\"id\":" << id
+    event_stream() << "{\"step_event\":\"SET_COLOR\",\"id\":" << id
               << ",\"color\":\"" << escape_json(color) << "\",\"line\":" << line << "}\n";
 }
 
 inline void step(const std::string& caption, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"STEP\",\"caption\":\""
+    event_stream() << "{\"step_event\":\"STEP\",\"caption\":\""
               << escape_json(caption) << "\",\"line\":" << line << "}" << std::endl;
 }
 
 inline void set_badge(int id, const std::string& text, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_BADGE\",\"id\":" << id
+    event_stream() << "{\"step_event\":\"SET_BADGE\",\"id\":" << id
               << ",\"text\":\"" << escape_json(text) << "\",\"line\":" << line << "}" << std::endl;
 }
 
 inline void set_edge_style(int u, int v, const std::string& style, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_EDGE_STYLE\",\"u\":" << u
+    event_stream() << "{\"step_event\":\"SET_EDGE_STYLE\",\"u\":" << u
               << ",\"v\":" << v << ",\"style\":\"" << escape_json(style)
               << "\",\"line\":" << line << "}" << std::endl;
 }
 
 inline void set_edge_label(int u, int v, const std::string& label, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_EDGE_LABEL\",\"u\":" << u
+    event_stream() << "{\"step_event\":\"SET_EDGE_LABEL\",\"u\":" << u
               << ",\"v\":" << v << ",\"label\":\"" << escape_json(label)
               << "\",\"line\":" << line << "}" << std::endl;
 }
@@ -119,19 +136,19 @@ template <typename T>
 inline void print(const T& value, int line = __builtin_LINE()) {
     std::ostringstream oss;
     oss << value;
-    std::cout << "{\"step_event\":\"PRINT\",\"message\":\""
+    event_stream() << "{\"step_event\":\"PRINT\",\"message\":\""
               << escape_json(oss.str()) << "\",\"line\":" << line << "}\n";
 }
 
 inline void show(const std::string& name, const std::vector<std::string>& items,
                  int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_STRUCT\",\"name\":\"" << escape_json(name)
+    event_stream() << "{\"step_event\":\"SET_STRUCT\",\"name\":\"" << escape_json(name)
               << "\",\"items\":[";
     for (size_t i = 0; i < items.size(); i++) {
-        if (i) std::cout << ",";
-        std::cout << "\"" << escape_json(items[i]) << "\"";
+        if (i) event_stream() << ",";
+        event_stream() << "\"" << escape_json(items[i]) << "\"";
     }
-    std::cout << "],\"line\":" << line << "}\n";
+    event_stream() << "],\"line\":" << line << "}\n";
 }
 
 template <typename T>
@@ -149,18 +166,18 @@ inline void show(const std::string& name, const std::vector<T>& items,
 inline void show_matrix(const std::string& name,
                         const std::vector<std::vector<std::string>>& rows,
                         int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_MATRIX\",\"name\":\"" << escape_json(name)
+    event_stream() << "{\"step_event\":\"SET_MATRIX\",\"name\":\"" << escape_json(name)
               << "\",\"rows\":[";
     for (size_t r = 0; r < rows.size(); r++) {
-        if (r) std::cout << ",";
-        std::cout << "[";
+        if (r) event_stream() << ",";
+        event_stream() << "[";
         for (size_t c = 0; c < rows[r].size(); c++) {
-            if (c) std::cout << ",";
-            std::cout << "\"" << escape_json(rows[r][c]) << "\"";
+            if (c) event_stream() << ",";
+            event_stream() << "\"" << escape_json(rows[r][c]) << "\"";
         }
-        std::cout << "]";
+        event_stream() << "]";
     }
-    std::cout << "],\"line\":" << line << "}\n";
+    event_stream() << "],\"line\":" << line << "}\n";
 }
 
 template <typename T>
@@ -180,7 +197,7 @@ inline void show_matrix(const std::string& name, const std::vector<std::vector<T
 }
 
 inline void set_multigraph(bool multi, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"SET_MULTI\",\"multi\":"
+    event_stream() << "{\"step_event\":\"SET_MULTI\",\"multi\":"
               << (multi ? "true" : "false") << ",\"line\":" << line << "}\n";
 }
 
@@ -252,10 +269,10 @@ inline std::string index_field(int index) {
 
 inline void emit_named(const char* event, const std::string& name, const std::string& fields,
                        int line, bool flush = false) {
-    std::cout << "{\"step_event\":\"" << event << "\",\"name\":\"" << escape_json(name) << "\""
+    event_stream() << "{\"step_event\":\"" << event << "\",\"name\":\"" << escape_json(name) << "\""
               << fields << ",\"line\":" << line << "}";
-    if (flush) std::cout << std::endl;
-    else std::cout << "\n";
+    if (flush) event_stream() << std::endl;
+    else event_stream() << "\n";
 }
 
 template <typename T>
@@ -323,32 +340,32 @@ inline void vector_result(const std::string& name, const std::vector<T>& values,
 }
 
 inline void graph_node_state(int id, NodeState state, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"GRAPH_NODE\",\"id\":" << id << ",\"state\":\""
+    event_stream() << "{\"step_event\":\"GRAPH_NODE\",\"id\":" << id << ",\"state\":\""
               << state_name(state) << "\",\"line\":" << line << "}\n";
 }
 
 inline void graph_edge_state(int u, int v, EdgeState state, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"GRAPH_EDGE\",\"u\":" << u << ",\"v\":" << v
+    event_stream() << "{\"step_event\":\"GRAPH_EDGE\",\"u\":" << u << ",\"v\":" << v
               << ",\"state\":\"" << state_name(state) << "\",\"line\":" << line << "}\n";
 }
 
 inline void graph_value(int id, const std::string& text, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"GRAPH_VALUE\",\"id\":" << id << ",\"text\":\""
+    event_stream() << "{\"step_event\":\"GRAPH_VALUE\",\"id\":" << id << ",\"text\":\""
               << escape_json(text) << "\",\"line\":" << line << "}\n";
 }
 
 inline void graph_component(int id, int component, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"GRAPH_COMPONENT\",\"id\":" << id
+    event_stream() << "{\"step_event\":\"GRAPH_COMPONENT\",\"id\":" << id
               << ",\"component\":" << component << ",\"line\":" << line << "}\n";
 }
 
 inline void graph_path(const std::vector<int>& path, int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"GRAPH_PATH\",\"path\":" << integers_json(path)
+    event_stream() << "{\"step_event\":\"GRAPH_PATH\",\"path\":" << integers_json(path)
               << ",\"line\":" << line << "}\n";
 }
 
 inline void graph_reset(int line = __builtin_LINE()) {
-    std::cout << "{\"step_event\":\"GRAPH_RESET\",\"line\":" << line << "}\n";
+    event_stream() << "{\"step_event\":\"GRAPH_RESET\",\"line\":" << line << "}\n";
 }
 
 }

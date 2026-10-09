@@ -49,6 +49,11 @@ const ids = (edge: GraphEdge) => ({
 });
 
 export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: boolean): GraphAnalysis {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  edges = edges.filter((edge) => {
+    const { source, target } = ids(edge);
+    return nodeIds.has(source) && nodeIds.has(target);
+  });
   const adjacency = new Map<number, number[]>();
   const weakAdjacency = new Map<number, number[]>();
   nodes.forEach((node) => adjacency.set(node.id, []));
@@ -60,22 +65,25 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
       weakAdjacency.get(source)?.push(target);
       weakAdjacency.get(target)?.push(source);
     }
-    if (!directed && source !== target) adjacency.get(target)?.push(source);
+    if (!directed) adjacency.get(target)?.push(source);
   });
 
   const visited = new Set<number>();
+  const weakComponentOf = new Map<number, number>();
   let componentCount = 0;
   nodes.forEach((node) => {
     if (visited.has(node.id)) return;
     componentCount++;
     const queue = [node.id];
     visited.add(node.id);
+    weakComponentOf.set(node.id, componentCount - 1);
     while (queue.length) {
       const current = queue.shift();
       if (current === undefined) continue;
       weakAdjacency.get(current)?.forEach((neighbor) => {
         if (!visited.has(neighbor)) {
           visited.add(neighbor);
+          weakComponentOf.set(neighbor, componentCount - 1);
           queue.push(neighbor);
         }
       });
@@ -83,7 +91,7 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
   });
 
   const colors = new Map<number, 0 | 1>();
-  let bipartite = true;
+  let bipartite = !edges.some((edge) => ids(edge).source === ids(edge).target);
   nodes.forEach((node) => {
     if (colors.has(node.id)) return;
     colors.set(node.id, 0);
@@ -91,7 +99,7 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     while (queue.length) {
       const current = queue.shift();
       if (current === undefined) continue;
-      adjacency.get(current)?.forEach((neighbor) => {
+      weakAdjacency.get(current)?.forEach((neighbor) => {
         const expected = colors.get(current) === 0 ? 1 : 0;
         if (!colors.has(neighbor)) {
           colors.set(neighbor, expected);
@@ -108,7 +116,8 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     return source !== target;
   });
   const connected = nodes.length > 0 && componentCount === 1;
-  const forest = !directed && componentCount > 0 && undirectedEdges.length === nodes.length - componentCount;
+  const forest = !directed && edges.length === undirectedEdges.length
+    && undirectedEdges.length === nodes.length - componentCount;
   let cyclic = false;
   if (directed) {
     const state = new Map<number, 0 | 1 | 2>();
@@ -163,14 +172,11 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     }
     return seen;
   };
-  const nonIsolated = nodes.filter((node) => (weakAdjacency.get(node.id)?.length ?? 0) > 0);
   const stronglyConnected = !directed
     ? connected
-    : nonIsolated.length === 0
-      ? nodes.length > 0
-    : nonIsolated.length === nodes.length
-      && reachable(adjacency, nonIsolated[0].id).size === nonIsolated.length
-      && reachable(reverse, nonIsolated[0].id).size === nonIsolated.length;
+    : nodes.length > 0
+      && reachable(adjacency, nodes[0].id).size === nodes.length
+      && reachable(reverse, nodes[0].id).size === nodes.length;
 
   const finishOrder: number[] = [];
   const visitedDirected = new Set<number>();
@@ -193,7 +199,7 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     });
   };
   if (!directed) {
-    nodes.forEach((node) => componentOf.set(node.id, 0));
+    weakComponentOf.forEach((component, node) => componentOf.set(node, component));
     stronglyConnectedComponents = nodes.length > 0 ? componentCount : 0;
   } else {
     [...finishOrder].reverse().forEach((node) => {
@@ -210,19 +216,19 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
       const distance = new Map(nodes.map((node) => [node.id, 0]));
       const predecessor = new Map<number, number>();
       for (let i = 0; i < nodes.length; i++) {
-        let changed = false;
+        let changedNode: number | undefined;
         edges.forEach((edge, edgeIndex) => {
           const { source, target } = ids(edge);
           const weight = edge.weight ?? 1;
           if ((distance.get(target) ?? 0) > (distance.get(source) ?? 0) + weight) {
             distance.set(target, (distance.get(source) ?? 0) + weight);
             predecessor.set(target, edgeIndex);
-            changed = true;
+            changedNode = target;
           }
         });
-        if (!changed) return false;
-        if (i === nodes.length - 1 && changed) {
-          let current = [...predecessor.keys()][0];
+        if (changedNode === undefined) return false;
+        if (i === nodes.length - 1) {
+          let current = changedNode;
           for (let step = 0; step < nodes.length; step++) {
             const edgeIndex = predecessor.get(current);
             if (edgeIndex === undefined) break;
@@ -306,10 +312,10 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
   const coloringByNode: Record<number, number> = {};
   nodes
     .slice()
-    .sort((a, b) => (adjacency.get(b.id)?.length ?? 0) - (adjacency.get(a.id)?.length ?? 0))
+    .sort((a, b) => (weakAdjacency.get(b.id)?.length ?? 0) - (weakAdjacency.get(a.id)?.length ?? 0))
     .forEach((node) => {
       const used = new Set(
-        (adjacency.get(node.id) ?? [])
+        (weakAdjacency.get(node.id) ?? [])
           .map((neighbor) => coloringByNode[neighbor])
           .filter((color): color is number => color !== undefined),
       );
@@ -342,8 +348,13 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
   }
 
   const eulerian = (() => {
-    const active = nodes.filter((node) => (adjacency.get(node.id)?.length ?? 0) > 0);
+    const incident = new Set(edges.flatMap((edge) => {
+      const { source, target } = ids(edge);
+      return [source, target];
+    }));
+    const active = nodes.filter((node) => incident.has(node.id));
     if (active.length === 0) return 'none' as const;
+    const activeWeak = reachable(weakAdjacency, active[0].id).size === active.length;
     if (directed) {
       const inDegree = new Map<number, number>();
       const outDegree = new Map<number, number>();
@@ -359,57 +370,50 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
         const difference = (outDegree.get(node.id) ?? 0) - (inDegree.get(node.id) ?? 0);
         return Math.abs(difference) > 1;
       });
-      const activeWeak = active.length > 0 && reachable(weakAdjacency, active[0].id).size === active.length;
       const balanced = nodes.every((node) => (inDegree.get(node.id) ?? 0) === (outDegree.get(node.id) ?? 0));
       return !invalidBalance && starts === 0 && ends === 0 && balanced && activeWeak ? 'circuit' as const
         : !invalidBalance && starts === 1 && ends === 1 && activeWeak ? 'path' as const : 'none' as const;
     }
     const odd = nodes.filter((node) => (adjacency.get(node.id)?.length ?? 0) % 2 === 1).length;
-    return weaklyConnected && odd === 0 ? 'circuit' as const
-      : weaklyConnected && odd === 2 ? 'path' as const : 'none' as const;
+    return activeWeak && odd === 0 ? 'circuit' as const
+      : activeWeak && odd === 2 ? 'path' as const : 'none' as const;
   })();
 
   const hamiltonian = (() => {
     if (nodes.length === 0 || nodes.length > 12) return { path: null, cycle: null };
-    const graph = new Map<number, Set<number>>();
-    nodes.forEach((node) => graph.set(node.id, new Set()));
+    const indexes = new Map(nodes.map((node, index) => [node.id, index]));
+    const neighbors = new Array<number>(nodes.length).fill(0);
     edges.forEach((edge) => {
       const { source, target } = ids(edge);
-      if (source !== target) {
-        graph.get(source)?.add(target);
-        if (!directed) graph.get(target)?.add(source);
-      }
+      const u = indexes.get(source)!;
+      const v = indexes.get(target)!;
+      neighbors[u] |= 1 << v;
+      if (!directed) neighbors[v] |= 1 << u;
     });
-    const start = nodes[0].id;
-    const search = (current: number, visited: Set<number>): boolean => {
-      if (visited.size === nodes.length) return true;
-      for (const neighbor of graph.get(current) ?? []) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor);
-          if (search(neighbor, visited)) return true;
-          visited.delete(neighbor);
+    const full = (1 << nodes.length) - 1;
+    // Track reachable endpoints for each visited subset: O(n² * 2^n).
+    const spanningEnds = (fixedStart: boolean): number => {
+      const ends = new Uint16Array(full + 1);
+      for (let i = 0; i < (fixedStart ? 1 : nodes.length); i++) ends[1 << i] = 1 << i;
+      for (let mask = 1; mask <= full; mask++) {
+        for (let u = 0; u < nodes.length; u++) {
+          if (!(ends[mask] & (1 << u))) continue;
+          const available = neighbors[u] & ~mask;
+          for (let v = 0; v < nodes.length; v++) {
+            const bit = 1 << v;
+            if (available & bit) ends[mask | bit] |= bit;
+          }
         }
       }
-      return false;
+      return ends[full];
     };
-    const path = nodes.length === 1 || search(start, new Set([start]));
-    const cycle = path && nodes.length > 2
-      ? [...(graph.get(start) ?? [])].some((neighbor) => {
-        const visited = new Set([start, neighbor]);
-        const searchCycle = (current: number): boolean => {
-          if (visited.size === nodes.length) return graph.get(current)?.has(start) ?? false;
-          for (const next of graph.get(current) ?? []) {
-            if (!visited.has(next)) {
-              visited.add(next);
-              if (searchCycle(next)) return true;
-              visited.delete(next);
-            }
-          }
-          return false;
-        };
-        return searchCycle(neighbor);
-      })
-      : nodes.length === 1;
+    const path = spanningEnds(false) !== 0;
+    const cycleEnds = path ? spanningEnds(true) : 0;
+    const canClose = nodes.some((_, i) => (cycleEnds & (1 << i)) !== 0 && (neighbors[i] & 1) !== 0);
+    const cycle = canClose && (
+      nodes.length !== 2 || directed
+      || edges.filter((edge) => ids(edge).source !== ids(edge).target).length >= 2
+    );
     return { path, cycle };
   })();
   const advancedAnalysisSkipped = nodes.length > 20 || edges.length > 80;

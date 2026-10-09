@@ -3,6 +3,45 @@
 Frontend Next.js do Runspect. O backend Go precisa estar rodando separadamente
 porque compila e executa C++17 com `g++` e sandbox do sistema operacional.
 
+Código C++ comum recebe visualização automática de variáveis, vetores,
+strings e matrizes. Representações usuais de grafos também são reconhecidas.
+Código com chamadas `viz::` mantém a visualização manual.
+
+O catálogo **técnicas** contém 24 programas C++17 independentes, sem chamadas
+`viz::` nem dependência de `visualizer.h`. Todos usam o mesmo template
+competitivo do editor: `#define endl '\n'`, `using ll = long long`,
+`solve()` e `signed main()` com entrada/saída rápida. Cada técnica documenta
+entrada, saída e complexidades. A visualização é gerada automaticamente pelo
+backend, sem alterar o programa mostrado no editor.
+
+Para compilar todos os exemplos com `g++` e conferir as saídas e os casos de
+borda, execute `npm run test:cpp`. Para verificar também a instrumentação,
+com as dependências Clang do backend instaladas, execute
+`RUNSPECT_TEST_AUTOMATIC=1 npm run test:cpp` (Linux).
+
+No Linux, o backend precisa de `g++`, `bubblewrap`, `util-linux` e
+`python3-clang` (incluído no Dockerfile). Veja os formatos reconhecidos e
+limites em [Visualização automática](../backend/AUTOMATIC_VISUALIZATION.md).
+
+## Preferências do editor
+
+Clique no ícone de ajustes ao lado de **Executar Algoritmo** para personalizar
+o Monaco. O painel oferece temas claro, escuro e alto contraste, paleta própria,
+tipografia, minimapa, recuo, cursor, sugestões e opções adicionais em JSON,
+com prévia ao vivo. Formatação automática depende de um formatador para C++.
+
+As preferências são salvas automaticamente no `localStorage`, na chave
+`runspect.editor.preferences.v1`, por navegador/perfil e origem do site.
+Elas sobrevivem ao recarregamento e são sincronizadas entre abas da mesma origem.
+Limpar os dados do site remove as preferências; em navegação privada elas podem
+ser temporárias. Se o armazenamento estiver indisponível, o painel avisa e as
+alterações continuam funcionando na sessão. Use **Exportar**, **Importar** ou
+**Restaurar padrões** para transportar ou redefinir as configurações.
+
+Opções avançadas têm prioridade sobre os controles do painel. Apenas valores
+serializáveis em JSON são aceitos; modelo, conteúdo, linguagem, tema, dimensões
+e modo de edição permanecem sob controle da integração.
+
 ## Desenvolvimento local
 
 Inicie o backend em um terminal:

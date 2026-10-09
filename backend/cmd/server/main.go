@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -72,11 +73,16 @@ func runHandler(cppRunner *runner.CppRunner) http.HandlerFunc {
 
 		r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
 		var req CodeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&req); err != nil {
 			handler.WriteError(w, http.StatusBadRequest, "JSON inválido ou código muito grande")
 			return
 		}
-		if req.Code == "" {
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			handler.WriteError(w, http.StatusBadRequest, "O corpo deve conter apenas um objeto JSON válido")
+			return
+		}
+		if strings.TrimSpace(req.Code) == "" {
 			handler.WriteError(w, http.StatusBadRequest, "O campo code é obrigatório")
 			return
 		}

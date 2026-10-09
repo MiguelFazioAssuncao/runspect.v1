@@ -13,6 +13,7 @@ interface TimelineControlsProps {
   onPrev: () => void;
   onSeek: (step: number) => void;
   onSpeedChange: (speed: number) => void;
+  disabled?: boolean;
 }
 
 export const TimelineControls: React.FC<TimelineControlsProps> = ({
@@ -25,8 +26,10 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
   onPrev,
   onSeek,
   onSpeedChange,
+  disabled = false,
 }) => {
   const hasSteps = totalSteps > 0;
+  const controlsDisabled = !hasSteps || disabled;
 
   return (
     <div className="timeline-controls">
@@ -34,7 +37,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
         <button
           type="button"
           onClick={() => onSeek(0)}
-          disabled={!hasSteps}
+          disabled={controlsDisabled}
           className="timeline-btn"
           title="Reiniciar"
           aria-label="Reiniciar"
@@ -44,7 +47,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
         <button
           type="button"
           onClick={onPrev}
-          disabled={!hasSteps}
+          disabled={controlsDisabled}
           className="timeline-btn"
           title="Anterior"
           aria-label="Anterior"
@@ -54,7 +57,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
         <button
           type="button"
           onClick={onPlayToggle}
-          disabled={!hasSteps}
+          disabled={controlsDisabled}
           className="timeline-btn timeline-btn-primary"
           title={isPlaying ? 'Pausar' : 'Play'}
           aria-label={isPlaying ? 'Pausar' : 'Play'}
@@ -64,7 +67,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
         <button
           type="button"
           onClick={onNext}
-          disabled={!hasSteps}
+          disabled={controlsDisabled}
           className="timeline-btn"
           title="Próximo"
           aria-label="Próximo"
@@ -83,7 +86,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
           max={Math.max(0, totalSteps - 1)}
           value={hasSteps ? currentStep : 0}
           onChange={(e) => onSeek(Number(e.target.value))}
-          disabled={!hasSteps}
+          disabled={controlsDisabled}
           className="timeline-slider"
           aria-label="Posição na linha do tempo"
         />
@@ -95,6 +98,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
             type="button"
             key={s}
             onClick={() => onSpeedChange(s)}
+            disabled={disabled}
             className={`timeline-speed-btn ${speed === s ? 'timeline-speed-btn-active' : ''}`}
             aria-pressed={speed === s}
           >
