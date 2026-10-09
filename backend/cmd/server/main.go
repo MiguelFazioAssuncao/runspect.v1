@@ -108,6 +108,7 @@ func runHandler(cppRunner *runner.CppRunner) http.HandlerFunc {
 func main() {
 	cppRunner := runner.NewCppRunner(resolveHeaderPath())
 	cppRunner.CompileTimeout = time.Duration(envInt("RUNSPECT_COMPILE_TIMEOUT_SEC", 10)) * time.Second
+	cppRunner.AnalysisTimeout = time.Duration(envInt("RUNSPECT_ANALYSIS_TIMEOUT_SEC", 30)) * time.Second
 
 	if strings.EqualFold(os.Getenv("RUNSPECT_SANDBOX"), "off") {
 		cppRunner.Sandbox = false
@@ -142,7 +143,7 @@ func main() {
 		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		WriteTimeout:      cppRunner.AnalysisTimeout + 2*cppRunner.CompileTimeout + cppRunner.RunTimeout + 5*time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}

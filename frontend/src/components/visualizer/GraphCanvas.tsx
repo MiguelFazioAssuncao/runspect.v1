@@ -1,6 +1,6 @@
 'use client';
 
-import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useId, useLayoutEffect, useImperativeHandle, useRef } from 'react';
 import * as d3 from 'd3';
 import { GraphNode, GraphEdge } from '@/types/visualizer';
 import { findBipartitePartitions, findHierarchicalLevels } from '@/lib/graphLayout';
@@ -21,6 +21,7 @@ type SimulatedNode = GraphNode & {
 };
 
 type SimulatedEdge = Omit<GraphEdge, 'source' | 'target'> & {
+  key: string;
   source: number | SimulatedNode;
   target: number | SimulatedNode;
   bend?: number;
@@ -202,6 +203,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const markerPrefix = useId().replace(/:/g, '');
+  const staticTopologyRef = useRef('');
+  const topologyRef = useRef('');
+  const viewportSizeRef = useRef('');
+  const simulationRef = useRef<d3.Simulation<SimulatedNode, undefined> | null>(null);
+  const worldRef = useRef<{ width: number; height: number } | null>(null);
   const positionsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const transformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
   const layoutRef = useRef<GraphLayout>(layout);
@@ -231,11 +238,24 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     [],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => () => {
+    simulationRef.current?.stop();
+  }, []);
+
+  useLayoutEffect(() => {
     if (!containerRef.current || !svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
     if (nodes.length === 0) {
+      simulationRef.current?.stop();
+      simulationRef.current = null;
+      worldRef.current = null;
+      topologyRef.current = '';
+      viewportSizeRef.current = '';
+      staticTopologyRef.current = '';
+      positionsRef.current.clear();
+      fitRef.current = () => {};
+      zoomRef.current = null;
       svg.selectAll('*').remove();
       return;
     }
@@ -243,12 +263,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     let simulation: d3.Simulation<SimulatedNode, undefined> | undefined;
     let layoutTimer: d3.Timer | undefined;
 
+    let renderedSize = '';
     const render = () => {
       if (!containerRef.current || !svgRef.current) return;
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
 
       if (width < 50 || height < 50) return;
+      const viewportChanged = viewportSizeRef.current !== `${width}:${height}`;
+      renderedSize = `${width}:${height}`;
+      viewportSizeRef.current = renderedSize;
+      const topology = JSON.stringify([layout, nodes.map(node => node.id), edges.map(edge => [nodeIdOf(edge.source), nodeIdOf(edge.target)])]);
+      const topologyChanged = topologyRef.current !== topology;
+      topologyRef.current = topology;
 
       const interactive = !staticRender && !window.matchMedia(COMPACT_QUERY).matches;
 
@@ -259,13 +286,23 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
       layoutTimer?.stop();
 
       svg.attr('viewBox', `0 0 ${width} ${height}`);
-      svg.selectAll('*').remove();
 
       const worldSide = Math.ceil(Math.sqrt(nodes.length)) * 160;
-      const worldW = Math.max(width, worldSide);
-      const worldH = Math.max(height, worldSide);
+      // Force coordinates belong to the graph, independently of the viewport.
+      worldRef.current ??= { width: Math.max(width, worldSide), height: Math.max(height, worldSide) };
+      const worldW = worldRef.current.width;
+      const worldH = worldRef.current.height;
+      const previousNodes = new Map(simulationRef.current?.nodes().map(node => [node.id, node]));
 
       const nodesCopy: SimulatedNode[] = nodes.map((node, index) => {
+        const previousNode = previousNodes.get(node.id);
+        if (!topologyChanged && previousNode) {
+          previousNode.label = node.label;
+          previousNode.color = node.color;
+          previousNode.highlighted = node.highlighted;
+          previousNode.badge = node.badge;
+          return previousNode;
+        }
         const savedPos = positionsRef.current.get(node.id);
         const spiralAngle = index * 2.399963229728653;
         const spiralRadius = 45 * Math.sqrt(index + 0.5);
@@ -275,6 +312,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
           ...node,
           x: startX,
           y: startY,
+          vx: layoutChanged ? 0 : previousNode?.vx,
+          vy: layoutChanged ? 0 : previousNode?.vy,
+          fx: layout === 'force' && !layoutChanged ? previousNode?.fx : null,
+          fy: layout === 'force' && !layoutChanged ? previousNode?.fy : null,
         };
       });
       const initialPositions = new Map(
@@ -372,7 +413,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         targetPoints = nodesCopy.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }));
       }
 
-      if (layout !== 'force' && !staticRender) {
+      const animateLayout = layout !== 'force' && !staticRender && (topologyChanged || viewportChanged);
+      if (animateLayout) {
         nodesCopy.forEach((node) => {
           const start = initialPositions.get(node.id);
           if (start) {
@@ -426,37 +468,46 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         });
       });
 
-      const edgesCopy: SimulatedEdge[] = validEdges.map((edge, index) => ({
-        source: edge.sourceId,
-        target: edge.targetId,
-        weight: edge.weight,
-        color: resolveColor(edge.color, '#64748b'),
-        highlighted: edge.highlighted,
-        style: edge.style,
-        label: edge.label,
-        bend: bends[index],
-        loopIndex: loopIndexes.get(index)?.index,
-        loopCount: loopIndexes.get(index)?.count,
-      }));
+      const edgeOccurrences = new Map<string, number>();
+      const edgesCopy: SimulatedEdge[] = validEdges.map((edge, index) => {
+        const pair = `${edge.sourceId}:${edge.targetId}`;
+        const occurrence = edgeOccurrences.get(pair) ?? 0;
+        edgeOccurrences.set(pair, occurrence + 1);
+        return {
+          key: `${pair}:${occurrence}`,
+          source: edge.sourceId,
+          target: edge.targetId,
+          weight: edge.weight,
+          color: resolveColor(edge.color, '#64748b'),
+          highlighted: edge.highlighted,
+          style: edge.style,
+          label: edge.label,
+          bend: bends[index],
+          loopIndex: loopIndexes.get(index)?.index,
+          loopCount: loopIndexes.get(index)?.count,
+        };
+      });
 
-      const defs = svg.append('defs');
-      Array.from(new Set(edgesCopy.map((edge) => resolveColor(edge.color, '#64748b')))).forEach((c) => {
-        defs
-          .append('marker')
-          .attr('id', `arrow-${c.replace('#', '')}`)
+      const markerColors = Array.from(new Set(edgesCopy.map(edge => resolveColor(edge.color, '#64748b'))));
+      const markerId = (color: string) => `${markerPrefix}-arrow-${markerColors.indexOf(color)}`;
+      const defs = svg.selectAll<SVGDefsElement, null>('defs').data([null]).join('defs');
+      const markers = defs.selectAll<SVGMarkerElement, string>('marker')
+          .data(directed ? markerColors : [], color => color)
+          .join('marker')
+          .attr('id', markerId)
           .attr('viewBox', '0 -5 10 10')
           .attr('refX', 9)
           .attr('refY', 0)
           .attr('markerUnits', 'userSpaceOnUse')
           .attr('markerWidth', 10)
           .attr('markerHeight', 10)
-          .attr('orient', 'auto')
-          .append('path')
+          .attr('orient', 'auto');
+      markers.selectAll<SVGPathElement, string>('path').data(color => [color]).join('path')
           .attr('d', 'M0,-5L10,0L0,5')
-          .attr('fill', c);
-      });
+          .attr('fill', color => color);
 
-      const root = svg.append('g').attr('data-graph-content', '').attr('transform', transformRef.current.toString());
+      const root = svg.selectAll<SVGGElement, null>('g[data-graph-content]').data([null]).join('g')
+        .attr('data-graph-content', '').attr('transform', transformRef.current.toString());
 
       let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
 
@@ -464,10 +515,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         targetPoints ?? nodesCopy.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }));
 
       const applyFit = (animate = false) => {
-        const t = fitTransform(currentPoints(), width, height);
+        const container = containerRef.current;
+        if (!container) return;
+        const t = fitTransform(currentPoints(), container.clientWidth, container.clientHeight);
         if (zoomBehavior) {
           if (animate) svg.transition().duration(300).call(zoomBehavior.transform, t);
-          else svg.call(zoomBehavior.transform, t);
+          else svg.interrupt().call(zoomBehavior.transform, t);
         } else {
           transformRef.current = t;
           root.attr('transform', t.toString());
@@ -496,29 +549,36 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         svg.on('.zoom', null).style('touch-action', 'pan-y');
       }
 
-      simulation?.stop();
-      simulation = d3
-        .forceSimulation(nodesCopy)
-        .force(
-          'link',
-          d3
-            .forceLink<SimulatedNode, SimulatedEdge>(edgesCopy)
-            .id((d) => d.id)
-            .distance(120),
-        )
+      simulation = simulationRef.current ?? d3.forceSimulation<SimulatedNode>();
+      simulation.stop();
+      const previousAlpha = simulation.alpha();
+      // forceLink mutates endpoints; remove old links before replacing nodes.
+      if (topologyChanged) {
+        simulation.force('link', null).nodes(nodesCopy);
+      }
+      const linkForce = d3
+        .forceLink<SimulatedNode, SimulatedEdge>(edgesCopy)
+        .id((d) => d.id)
+        .distance(120);
+      simulation.force('link', linkForce);
+      if (topologyChanged) simulation
         .force('charge', d3.forceManyBody().strength(-350))
         .force('collide', d3.forceCollide<SimulatedNode>(NODE_RADIUS + NODE_PADDING))
         .force('x', d3.forceX(worldW / 2).strength(0.08))
         .force('y', d3.forceY(worldH / 2).strength(0.08));
 
       const allPlaced = nodes.every((n) => positionsRef.current.has(n.id));
-      const startAlpha = layout !== 'force' ? 0 : layoutChanged ? 0.8 : allPlaced ? 0.1 : 1;
+      const startAlpha = layout !== 'force' ? 0
+        : layoutChanged ? 0.8
+          : topologyChanged ? allPlaced ? Math.max(previousAlpha, 0.25) : 1
+            : previousAlpha;
       simulation.alpha(startAlpha);
+      simulationRef.current = simulation;
 
       const link = root
-        .append('g')
+        .selectAll<SVGGElement, null>('g[data-graph-edges]').data([null]).join('g').attr('data-graph-edges', '')
         .selectAll<SVGPathElement, SimulatedEdge>('path')
-        .data(edgesCopy)
+        .data(edgesCopy, edge => edge.key)
         .join('path')
         .attr('fill', 'none')
         .attr('stroke', (d: SimulatedEdge, index: number) =>
@@ -541,11 +601,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
           d.style === 'dashed' ? '8 5' : d.style === 'dotted' ? '2 4' : null,
         )
         .attr('marker-end', (d: SimulatedEdge) =>
-          directed ? `url(#arrow-${resolveColor(d.color, '#64748b').replace('#', '')})` : null,
+          directed ? `url(#${markerId(resolveColor(d.color, '#64748b'))})` : null,
         );
 
       link
-        .append('title')
+        .selectAll<SVGTitleElement, SimulatedEdge>('title').data(edge => [edge]).join('title')
         .text(
           (d: SimulatedEdge) =>
             `${nodeIdOf(d.source)} ${directed ? '→' : '—'} ${nodeIdOf(d.target)}${
@@ -554,9 +614,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         );
 
       const edgeLabels = root
-        .append('g')
+        .selectAll<SVGGElement, null>('g[data-graph-edge-labels]').data([null]).join('g').attr('data-graph-edge-labels', '')
         .selectAll<SVGTextElement, SimulatedEdge>('text')
-        .data(edgesCopy)
+        .data(edgesCopy, edge => edge.key)
         .join('text')
         .text((d: SimulatedEdge) =>
           nodes.length > 80 || edges.length > 240
@@ -576,13 +636,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         .attr('stroke-linejoin', 'round');
 
       const node = root
-        .append('g')
+        .selectAll<SVGGElement, null>('g[data-graph-nodes]').data([null]).join('g').attr('data-graph-nodes', '')
         .selectAll<SVGGElement, SimulatedNode>('g')
-        .data(nodesCopy)
+        .data(nodesCopy, node => node.id)
         .join('g');
 
       node
-        .append('circle')
+        .selectAll<SVGCircleElement, SimulatedNode>('circle').data(node => [node]).join('circle')
         .attr('r', NODE_RADIUS)
         .attr('fill', (d: SimulatedNode) => {
           if (minCutSide.length > 0) return minCutSide.includes(d.id) ? '#38bdf8' : '#f97316';
@@ -609,7 +669,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         );
 
       node
-        .append('text')
+        .selectAll<SVGTextElement, SimulatedNode>('text[data-node-label]').data(node => [node]).join('text').attr('data-node-label', '')
         .text((d: SimulatedNode) => d.label)
         .attr('text-anchor', 'middle')
         .attr('dy', 4)
@@ -618,8 +678,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         .attr('font-weight', 'bold');
 
       node
-        .filter((d: SimulatedNode) => !!d.badge)
-        .append('text')
+        .selectAll<SVGTextElement, SimulatedNode>('text[data-node-badge]').data(node => node.badge ? [node] : []).join('text').attr('data-node-badge', '')
         .text((d: SimulatedNode) => d.badge ?? '')
         .attr('text-anchor', 'middle')
         .attr('dy', NODE_RADIUS + 14)
@@ -630,7 +689,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         .attr('stroke-width', 3)
         .attr('paint-order', 'stroke');
 
-      node.append('title').text((d: SimulatedNode) => `id ${d.id} · ${d.label}`);
+      node.selectAll<SVGTitleElement, SimulatedNode>('title').data(node => [node]).join('title').text((d: SimulatedNode) => `id ${d.id} · ${d.label}`);
+      node.on('.drag', null);
 
       if (layout === 'force' && interactive) {
         const dragBehavior = d3
@@ -666,7 +726,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         node.attr('transform', (d: SimulatedNode) => `translate(${d.x ?? 0},${d.y ?? 0})`);
       };
 
-      if (layout !== 'force' && !staticRender) {
+      if (animateLayout) {
         const startPositions = nodesCopy.map((n) => ({
           node: n,
           x: initialPositions.get(n.id)?.x ?? width / 2,
@@ -691,38 +751,28 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
 
       const rememberPositions = () => {
         nodesCopy.forEach((currentNode) => {
-          currentNode.x = Math.max(
-            NODE_RADIUS + NODE_PADDING,
-            Math.min(worldW - NODE_RADIUS - NODE_PADDING, currentNode.x ?? worldW / 2),
-          );
-          currentNode.y = Math.max(
-            NODE_RADIUS + NODE_PADDING,
-            Math.min(worldH - NODE_RADIUS - NODE_PADDING, currentNode.y ?? worldH / 2),
-          );
-
           positionsRef.current.set(currentNode.id, {
-            x: currentNode.x,
-            y: currentNode.y,
+            x: currentNode.x ?? worldW / 2,
+            y: currentNode.y ?? worldH / 2,
           });
         });
       };
 
       if (staticRender) {
         simulation.stop();
-        if (layout === 'force') simulation.tick(180);
+        if (layout === 'force' && staticTopologyRef.current !== topology) simulation.tick(180);
+        staticTopologyRef.current = topology;
         rememberPositions();
         updatePositions();
         applyFit();
         return;
       }
 
-      let tickCount = 0;
       simulation.on('tick', () => {
         rememberPositions();
         updatePositions();
 
-        tickCount++;
-        if (autoFitRef.current && !draggingRef.current && tickCount % 4 === 0) applyFit();
+        if (autoFitRef.current && !draggingRef.current) applyFit();
       });
       simulation.on('end', () => {
         if (autoFitRef.current && !draggingRef.current) applyFit();
@@ -730,10 +780,21 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
 
       updatePositions();
       if (autoFitRef.current) applyFit();
+      if (layout === 'force' && simulation.alpha() >= simulation.alphaMin()) simulation.restart();
     };
 
     const resizeObserver = new ResizeObserver(() => {
-      render();
+      const container = containerRef.current;
+      if (!container || container.clientWidth < 50 || container.clientHeight < 50) return;
+      const size = `${container.clientWidth}:${container.clientHeight}`;
+      if (renderedSize === size) return;
+      if (layout === 'force' && renderedSize) {
+        // Fullscreen changes the camera, without reheating or moving the graph.
+        renderedSize = size;
+        viewportSizeRef.current = size;
+        svg.attr('viewBox', `0 0 ${container.clientWidth} ${container.clientHeight}`);
+        if (autoFitRef.current) fitRef.current();
+      } else render();
     });
 
     resizeObserver.observe(containerRef.current);
@@ -743,6 +804,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
       resizeObserver.disconnect();
       simulation?.stop();
       layoutTimer?.stop();
+      svg.interrupt();
     };
   }, [
     nodes,
@@ -758,6 +820,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     negativeCycleEdgeIndexes,
     minCutEdgeIndexes,
     minCutSide,
+    markerPrefix,
   ]);
 
   return (

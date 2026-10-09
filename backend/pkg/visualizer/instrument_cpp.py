@@ -27,6 +27,41 @@ def load_clang(runtime):
     return cindex, resources[-1] if resources else None
 
 
+def compiler_options(resources):
+    options = ["-std=c++17", "-x", "c++"]
+    # Use identical header search paths when building and consuming the PCH.
+    cpp_headers = sorted(glob.glob("/usr/include/c++/*"), key=lambda p: int(Path(p).name) if Path(p).name.isdigit() else 0)
+    if cpp_headers:
+        version = Path(cpp_headers[-1]).name
+        for directory in [cpp_headers[-1], *glob.glob(f"/usr/include/*-linux-gnu/c++/{version}"), cpp_headers[-1] + "/backward"]:
+            options += ["-isystem", directory]
+    for directory in glob.glob("/usr/include/*-linux-gnu"):
+        options += ["-isystem", directory]
+    options += ["-isystem", "/usr/include"]
+    if resources:
+        options += ["-isystem", resources]
+    return options
+
+
+def stdlib_first(source):
+    return bool(re.match(rb"\s*#\s*include\s*<bits/stdc\+\+\.h>[^\S\n]*(?:\n|$)", source))
+
+
+def parse_source(ci, path, source, options, cache):
+    pch = Path(cache) / "stdlib.pch"
+    # Loading standard headers before a user's macros would change semantics.
+    # Only accelerate sources which already include bits/stdc++.h first.
+    if cache and stdlib_first(source) and pch.is_file():
+        try:
+            unit = ci.Index.create().parse(path, args=options + ["-include-pch", str(pch)])
+            if not any(d.severity >= ci.Diagnostic.Error for d in unit.diagnostics):
+                return unit
+        except ci.TranslationUnitLoadError:
+            pass
+    # A stale or incompatible optional PCH must never disable visualization.
+    return ci.Index.create().parse(path, args=options)
+
+
 class Instrumenter:
     def __init__(self, cindex, unit, source, path):
         self.ci = cindex
@@ -38,7 +73,9 @@ class Instrumenter:
         self.serial = 0
         self.prefix = "runspect_" + hashlib.sha256(source).hexdigest()[:10] + "_"
         self.graphs = set()
+        self.sorting_vectors = set()
         self.aliases = {}
+        self.strings = set()
         self.alias_targets = {}
         self.mutated = set()
         self.lengths = {}
@@ -89,6 +126,7 @@ class Instrumenter:
             "std::vector<", "std::basic_string<", "std::array<", "std::deque<",
             "std::list<", "std::set<", "std::map<", "std::unordered_",
             "std::queue<", "std::stack<", "std::priority_queue<", "std::pair<",
+            "std::tuple<", "std::optional<", "std::bitset<",
         ))
         tokens = [t.spelling for t in node.get_tokens()]
         has_init = initialized or standard or "=" in tokens or "{" in tokens
@@ -122,6 +160,8 @@ class Instrumenter:
     def inspect_patterns(self, node):
         if node.kind == self.K.VAR_DECL:
             name = node.spelling.lower()
+            if "basic_string<char" in node.type.get_canonical().spelling:
+                self.strings.add(node.get_usr())
             if re.fullmatch(r"(?:g|adj|adjacency|graph|grafo|edges|arestas)(?:_\w+)?", name):
                 self.graphs.add(node.get_usr())
             # A numeric vector constructed from a string is a visual alias.
@@ -139,6 +179,14 @@ class Instrumenter:
                 if refs: self.lengths[node.get_usr()] = refs[0].referenced.get_usr()
         if node.kind == self.K.BINARY_OPERATOR:
             kids = self.children(node)
+            if len(kids) == 2 and self.source[kids[0].extent.end.offset:kids[1].extent.start.offset].strip() in (b"<", b">", b"<=", b">="):
+                # A comparison between positions of the same container is
+                # evidence of ordering; runtime still verifies the final order.
+                positions = [re.fullmatch(r"([A-Za-z_]\w*)\s*\[[\s\S]+\]", self.text(kid)) for kid in kids]
+                if all(positions) and positions[0].group(1) == positions[1].group(1):
+                    for sub in self.descendants(kids[0]):
+                        if sub.kind == self.K.DECL_REF_EXPR and sub.referenced and sub.spelling == positions[0].group(1):
+                            self.sorting_vectors.add(sub.referenced.get_usr())
             if len(kids) >= 2 and self.source[kids[0].extent.end.offset:kids[1].extent.start.offset].strip() == b"=":
                 for sub in [kids[0], *self.descendants(kids[0])]:
                     if sub.kind == self.K.DECL_REF_EXPR and sub.referenced:
@@ -147,6 +195,8 @@ class Instrumenter:
             for sub in self.descendants(node):
                 if sub.kind == self.K.DECL_REF_EXPR and sub.referenced:
                     self.mutated.add(sub.referenced.get_usr())
+                    if node.spelling in ("sort", "stable_sort"):
+                        self.sorting_vectors.add(sub.referenced.get_usr())
         if node.kind == self.K.CALL_EXPR and node.spelling in ("push_back", "emplace_back"):
             # adjacency[u].push_back(v), including arbitrary variable names.
             for sub in self.descendants(node):
@@ -162,17 +212,20 @@ class Instrumenter:
             yield child
             yield from self.descendants(child)
 
-    def frame(self, scope, line, caption=None):
+    def frame(self, scope, line, caption=None, defer_graph=None):
         self.serial += 1
         frame = self.prefix + str(self.serial)
         caption = caption or f"Linha {line}"
         calls = []
         for name, usr, _, ready in scope.values():
+            if usr == defer_graph:
+                continue
             display = self.aliases.get(usr, name)
             if display != name and display in scope and scope[display][1] == self.alias_targets[usr]:
                 continue
             method = "graph" if usr in self.graphs else "observe"
-            call = f"{frame}.{method}({json.dumps(display, ensure_ascii=True)},{name});"
+            sorting = ",true" if method == "observe" and usr in self.sorting_vectors else ""
+            call = f"{frame}.{method}({json.dumps(display, ensure_ascii=True)},{name}{sorting});"
             calls.append((f"if({ready})" if ready else "") + call)
         return "{ ::runspect_auto::Frame " + frame + "(" + json.dumps(caption) + "," + str(line) + ");" + "".join(calls) + "}"
 
@@ -230,7 +283,7 @@ class Instrumenter:
     def match_written(self, node, scope):
         # Recognize the usual substring position formula, then let the runtime
         # verify actual text/pattern equality before announcing a match.
-        if node.kind != self.K.BINARY_OPERATOR or len(self.aliases) < 2:
+        if node.kind != self.K.BINARY_OPERATOR:
             return ""
         tokens = [t.spelling for t in node.get_tokens()]
         if len(tokens) != 7 or tokens[1] != "=" or tokens[3] != "-" or tokens[5:] != ["+", "1"]:
@@ -239,10 +292,11 @@ class Instrumenter:
         if position not in scope or length not in scope:
             return ""
         pattern = self.lengths.get(scope[length][1])
-        text_names = [usr for usr in self.aliases if usr != pattern and any(v[1] == usr for v in scope.values())]
-        if pattern not in self.aliases or len(text_names) != 1:
+        displays = {v[1]: self.aliases.get(v[1], v[0]) for v in scope.values() if v[1] in self.strings}
+        text_names = [usr for usr in displays if usr != pattern]
+        if pattern not in displays or len(text_names) != 1:
             return ""
-        return f"::runspect_auto::match({json.dumps(self.aliases[text_names[0]])},{json.dumps(self.aliases[pattern])},{position},{length},{node.location.line});"
+        return f"::runspect_auto::match({json.dumps(displays[text_names[0]])},{json.dumps(displays[pattern])},{position},{length},{node.location.line});"
 
     def reads(self, node, scope):
         # Replace only a named container's subscript. The index is evaluated
@@ -277,26 +331,94 @@ class Instrumenter:
         for child in self.children(node):
             self.reads(child, scope)
 
-    def block(self, node, inherited, entry=False):
+    def search_condition(self, node):
+        # Only a direct equality with one subscript is a value lookup. Do not
+        # mistake loop bounds, two-container comparisons or graph metadata for
+        # a successful search. The original expression is evaluated only once.
+        while node.kind in (self.K.UNEXPOSED_EXPR, self.K.PAREN_EXPR) and len(self.children(node)) == 1:
+            node = self.children(node)[0]
+        if node.kind != self.K.BINARY_OPERATOR:
+            return False
+        kids = self.children(node)
+        if len(kids) != 2 or self.source[kids[0].extent.end.offset:kids[1].extent.start.offset].strip() != b"==":
+            return False
+        positions = [re.fullmatch(r"([A-Za-z_]\w*)\s*\[[\s\S]+\]", self.text(kid)) for kid in kids]
+        if sum(position is not None for position in positions) != 1:
+            return False
+        position = next(position for position in positions if position)
+        if self.graphs and re.fullmatch(r"(?:dist|distance|distancia|d|pai|parent|prev|predecessor|vis|visited|visitado|seen)(?:_\w+)?", position.group(1).lower()):
+            return False
+        other = kids[1] if positions[0] else kids[0]
+        return not any(sub.kind in (self.K.ARRAY_SUBSCRIPT_EXPR, self.K.CALL_EXPR) for sub in [other, *self.descendants(other)])
+
+    def adjacency_insertion(self, node):
+        # Only direct calls with side-effect-free endpoints can be grouped.
+        # AST identity distinguishes shadowed containers; token matching here
+        # restricts the supported argument forms, without rewriting C++ values.
+        while node.kind == self.K.UNEXPOSED_EXPR and len(self.children(node)) == 1:
+            node = self.children(node)[0]
+        if node.kind != self.K.CALL_EXPR or node.spelling not in ("push_back", "emplace_back"):
+            return None
+        text = "".join(token.spelling for token in node.get_tokens())
+        atom = r"(?:[A-Za-z_]\w*|[0-9]+)"
+        match = re.fullmatch(r"([A-Za-z_]\w*)\[(" + atom + r")\]\.(push_back|emplace_back)\((.*)\)", text)
+        if not match:
+            return None
+        name, source, method, argument = match.groups()
+        target, weight = argument, "1"
+        if argument.startswith("{") and argument.endswith("}"):
+            argument = argument[1:-1]
+        elif argument.startswith("make_pair(") or argument.startswith("std::make_pair("):
+            argument = argument[argument.index("(") + 1:-1]
+        if "," in argument:
+            parts = argument.split(",")
+            if len(parts) != 2:
+                return None
+            target, weight = parts
+        elif method == "push_back":
+            target = argument
+        if not re.fullmatch(atom, target) or not re.fullmatch(atom, weight):
+            return None
+        refs = [sub.referenced for sub in self.descendants(node)
+                if sub.kind == self.K.DECL_REF_EXPR and sub.spelling == name and sub.referenced]
+        if not refs or refs[0].get_usr() not in self.graphs:
+            return None
+        return refs[0].get_usr(), source, target, weight
+
+    def block(self, node, inherited, entry=False, jump_scope=False):
         scope = dict(inherited)
         start, end = node.extent.start.offset, node.extent.end.offset
         if entry:
             self.insert(start + 1, self.frame(scope, node.location.line, "Início da função"))
-        for stmt in self.children(node):
-            self.statement(stmt, scope)
+        statements = self.children(node)
+        deferred = {}
+        index = 0
+        while index + 1 < len(statements):
+            first = self.adjacency_insertion(statements[index])
+            second = self.adjacency_insertion(statements[index + 1])
+            if first and second == (first[0], first[2], first[1], first[3]):
+                # An undirected insertion is complete after both adjacency
+                # writes. Keep the intermediate execution frame, observing
+                # other variables but not a temporarily asymmetric graph.
+                deferred[index] = first[0]
+                index += 2
+            else:
+                index += 1
+        for index, stmt in enumerate(statements):
+            self.statement(stmt, scope, deferred.get(index), jump_scope=jump_scope)
         self.insert(end - 1, self.frame(scope, node.extent.end.line, "Fim do bloco"))
 
-    def body(self, node, scope):
+    def body(self, node, scope, jump_scope=False):
         if node.kind == self.K.COMPOUND_STMT:
-            self.block(node, scope)
+            self.block(node, scope, jump_scope=jump_scope)
         else:
             # Braces preserve the original controlled statement and dangling
             # else relationships. Declarations keep their original scope.
             self.insert(node.extent.start.offset, "{")
-            self.statement(node, dict(scope))
+            self.statement(node, dict(scope), jump_scope=jump_scope)
             self.insert(self.end(node), "}")
 
-    def statement(self, node, scope):
+    def statement(self, node, scope, defer_graph=None, jump_scope=False):
         K = self.K
         kind = node.kind
         if kind == K.COMPOUND_STMT:
@@ -323,9 +445,52 @@ class Instrumenter:
                 v = self.variable(var)
                 self.reads(var, scope)
                 if v:
+                    if jump_scope and v[3]:
+                        # A later case can bypass this declaration. Adding an
+                        # initialized readiness flag here would make valid C++
+                        # illegal, and reading the scalar would be unsafe.
+                        scope.pop(v[0], None)
+                        self.warnings.add("Escalares sem inicialização no escopo compartilhado de switch não são observados; use blocos por caso.")
+                        continue
                     scope[v[0]] = v
                     if v[3]: guards.append(f"bool {v[3]}=false;")
             self.insert(self.end(node), "".join(guards) + self.frame(scope, node.location.line))
+            return
+        if kind == K.SWITCH_STMT:
+            kids = self.children(node)
+            if not kids:
+                return
+            body = kids[-1]
+            local = dict(scope)
+            # Some libclang versions omit C++17 switch init-statements from
+            # get_children(). Recover their declarations from resolved refs.
+            for sub in self.descendants(node):
+                if sub.kind == K.DECL_REF_EXPR and sub.referenced:
+                    var = sub.referenced
+                    if var.kind == K.VAR_DECL and node.extent.start.offset < var.extent.start.offset < body.extent.start.offset:
+                        v = self.variable(var)
+                        if v and not v[3]:
+                            local[v[0]] = v
+                        else:
+                            local.pop(var.spelling, None)
+            # Keep the integral/enum switch condition and its single evaluation.
+            for expr in kids[:-1]:
+                self.reads(expr, local)
+            self.insert(node.extent.start.offset, self.frame(scope, node.location.line, "Seleção do switch"))
+            self.body(body, local, jump_scope=True)
+            self.insert(self.end(node), self.frame(scope, node.location.line))
+            return
+        if kind in (K.CASE_STMT, K.DEFAULT_STMT):
+            kids = self.children(node)
+            if kids:
+                stmt = kids[-1]
+                caption = "Caso padrão" if kind == K.DEFAULT_STMT else "Caso " + self.text(kids[0])
+                self.insert(stmt.extent.start.offset, self.frame(scope, node.location.line, caption))
+                self.statement(stmt, scope, jump_scope=jump_scope)
+            return
+        if kind == K.UNEXPOSED_STMT and "fallthrough" in [t.spelling for t in node.get_tokens()]:
+            # The attribute must remain immediately before the next case.
+            self.insert(node.extent.start.offset, self.frame(scope, node.location.line))
             return
         if kind in (K.FOR_STMT, K.CXX_FOR_RANGE_STMT, K.WHILE_STMT, K.DO_STMT, K.IF_STMT):
             if kind == K.IF_STMT and any(t.spelling == "constexpr" for t in list(node.get_tokens())[:3]):
@@ -381,8 +546,9 @@ class Instrumenter:
                 else:
                     self.reads(expr, local)
                     if expr in conditions:
+                        search = ",true" if kind == K.IF_STMT and self.search_condition(expr) else ""
                         self.insert(expr.extent.start.offset, "::runspect_auto::condition(static_cast<bool>((")
-                        self.insert(expr.extent.end.offset, "))," + str(expr.location.line) + ")")
+                        self.insert(expr.extent.end.offset, "))," + str(expr.location.line) + search + ")")
             for body in bodies:
                 self.body(body, local)
             self.insert(self.end(node), self.frame(scope, node.location.line))
@@ -391,18 +557,19 @@ class Instrumenter:
             self.insert(node.extent.start.offset, self.frame(scope, node.location.line))
             self.reads(node, scope)
             return
-        if kind in (K.SWITCH_STMT, K.CASE_STMT, K.DEFAULT_STMT, K.LABEL_STMT, K.GOTO_STMT, K.CXX_TRY_STMT):
+        if kind in (K.LABEL_STMT, K.GOTO_STMT, K.CXX_TRY_STMT):
             # Don't rewrite declarations across jumps or exception boundaries.
-            self.warnings.add("Switch, goto e tratamento de exceções têm acompanhamento parcial.")
+            self.warnings.add("Goto e tratamento de exceções têm acompanhamento parcial.")
             return
         # Readiness flags become true only after a write actually executes.
         self.reads(node, scope)
-        self.insert(self.end(node), self.initialize_written(node, scope) + self.snapshot_write(node, scope) + self.frame(scope, node.location.line) + self.match_written(node, scope))
+        self.insert(self.end(node), self.initialize_written(node, scope) + self.snapshot_write(node, scope) + self.frame(scope, node.location.line, defer_graph=defer_graph) + self.match_written(node, scope))
 
     def run(self):
         self.collect(self.unit.cursor)
         for function in self.functions:
             self.inspect_patterns(function)
+        self.sorting_vectors.intersection_update(self.mutated)
         self.aliases = {usr: name for usr, name in self.aliases.items() if usr not in self.mutated and self.alias_targets[usr] not in self.mutated}
         for function in self.functions:
             bodies = [c for c in self.children(function) if c.kind == self.K.COMPOUND_STMT]
@@ -419,7 +586,7 @@ class Instrumenter:
             for body in self.children(function):
                 if body.kind == self.K.COMPOUND_STMT:
                     if function.spelling == "main":
-                        self.insert(body.extent.start.offset + 1, "::runspect_auto::start();")
+                        self.insert(body.extent.start.offset + 1, "::runspect_auto::start(); ::runspect_auto::Completion " + self.prefix + "completion;")
                     self.block(body, scope, entry=True)
         # Multiple insertions at the same position must preserve discovery order.
         output = bytearray(self.source)
@@ -432,6 +599,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("source")
     parser.add_argument("--runtime", default="")
+    parser.add_argument("--cache", default="")
     args = parser.parse_args()
     try:
         ci, resources = load_clang(args.runtime)
@@ -440,21 +608,9 @@ def main():
         return 2
     path = os.path.abspath(args.source)
     source = Path(path).read_bytes()
-    options = ["-std=c++17", "-x", "c++", "-I", str(Path(path).parent)]
-    # libclang can be relocated (including into the sandbox); don't rely on its
-    # install prefix to discover GCC's C++ headers.
-    cpp_headers = sorted(glob.glob("/usr/include/c++/*"), key=lambda p: int(Path(p).name) if Path(p).name.isdigit() else 0)
-    if cpp_headers:
-        version = Path(cpp_headers[-1]).name
-        for directory in [cpp_headers[-1], *glob.glob(f"/usr/include/*-linux-gnu/c++/{version}"), cpp_headers[-1] + "/backward"]:
-            options += ["-isystem", directory]
-    for directory in glob.glob("/usr/include/*-linux-gnu"):
-        options += ["-isystem", directory]
-    options += ["-isystem", "/usr/include"]
-    if resources:
-        options += ["-isystem", resources]
+    options = compiler_options(resources) + ["-I", str(Path(path).parent)]
     try:
-        unit = ci.Index.create().parse(path, args=options)
+        unit = parse_source(ci, path, source, options, args.cache)
     except ci.TranslationUnitLoadError as error:
         print("Falha na análise automática: " + str(error), file=sys.stderr)
         return 1
@@ -472,7 +628,10 @@ def main():
                     print(json.dumps({"mode": "manual"}))
                     return 0
     output = tool.run()
-    Path(path).write_bytes(b'#include "automatic.h"\n#line 1 "solution.cpp"\n' + output)
+    # GCC cannot load a PCH from inside another header. Keep this include at
+    # translation-unit level, before the instrumentation header and C++ tokens.
+    prefix = b'#include <bits/stdc++.h>\n' if stdlib_first(source) else b''
+    Path(path).write_bytes(prefix + b'#include "automatic.h"\n#line 1 "solution.cpp"\n' + output)
     print(json.dumps({"mode": "automatic", "warnings": sorted(tool.warnings)}))
     return 0
 

@@ -1,20 +1,22 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { TraceStep } from '@/types/visualizer';
 import {
-  buildGraphState,
+  createGraphReplay,
   frameCaption,
   frameEnds,
   isDirected,
   isMulti,
   isWeighted,
 } from '@/lib/graphReducer';
-import { buildVectorsState } from '@/lib/vectorReducer';
+import { createVectorReplay } from '@/lib/vectorReducer';
 import { playerStartFrame } from '@/lib/playerStart';
+import { startPlayback } from '@/lib/playback';
 
-export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = false) {
+export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = false, recordingIndex?: number) {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [speed, setSpeed] = useState<number>(1);
+  const playbackIndex = useRef(0);
 
   const frames = useMemo(() => frameEnds(steps), [steps]);
   const initialStepIndex = useMemo(
@@ -22,54 +24,57 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     [steps, frames, startAtVisualization],
   );
   const totalSteps = frames.length;
-  const normalizedStepIndex = totalSteps === 0 ? 0 : Math.min(currentStepIndex, totalSteps - 1);
+  const normalizedStepIndex = totalSteps === 0 ? 0 : Math.min(recordingIndex ?? currentStepIndex, totalSteps - 1);
   const eventIndex = frames[normalizedStepIndex] ?? 0;
   const eventLine = steps[eventIndex]?.data?.line;
   const line =
     typeof eventLine === 'number' && Number.isFinite(eventLine) && eventLine > 0 ? eventLine : null;
 
   const nextStep = useCallback(() => {
-    if (normalizedStepIndex + 1 >= totalSteps - 1) setIsPlaying(false);
-    setCurrentStepIndex((prev) => {
-      if (prev >= totalSteps - 1) {
-        return prev;
-      }
-      return prev + 1;
-    });
-  }, [normalizedStepIndex, totalSteps]);
+    const index = Math.min(playbackIndex.current + 1, Math.max(0, totalSteps - 1));
+    playbackIndex.current = index;
+    setCurrentStepIndex(index);
+    if (index >= totalSteps - 1) setIsPlaying(false);
+  }, [totalSteps]);
 
   const prevStep = useCallback(() => {
-    setCurrentStepIndex((prev) => Math.max(0, prev - 1));
+    playbackIndex.current = Math.max(0, playbackIndex.current - 1);
+    setCurrentStepIndex(playbackIndex.current);
   }, []);
 
   const seek = useCallback(
     (index: number) => {
-      setCurrentStepIndex(totalSteps === 0 ? 0 : Math.min(Math.max(0, index), totalSteps - 1));
+      playbackIndex.current = totalSteps === 0 ? 0 : Math.min(Math.max(0, index), totalSteps - 1);
+      setCurrentStepIndex(playbackIndex.current);
+      if (playbackIndex.current >= totalSteps - 1) setIsPlaying(false);
     },
     [totalSteps]
   );
 
   const changePlaying = useCallback((playing: boolean) => {
     if (playing && normalizedStepIndex >= totalSteps - 1 && totalSteps > 1) {
+      playbackIndex.current = 0;
       setCurrentStepIndex(0);
     }
     setIsPlaying(playing && totalSteps > 1);
   }, [normalizedStepIndex, totalSteps]);
 
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (isPlaying && normalizedStepIndex < totalSteps - 1) {
-      timer = setTimeout(() => {
-        nextStep();
-      }, 1000 / speed);
-    }
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [isPlaying, normalizedStepIndex, totalSteps, speed, nextStep]);
+    if (!isPlaying || totalSteps < 2) return;
+    return startPlayback({
+      speed, totalSteps,
+      getIndex: () => playbackIndex.current,
+      onIndex: (index) => {
+        playbackIndex.current = index;
+        setCurrentStepIndex(index);
+      },
+      onFinish: () => setIsPlaying(false),
+    });
+  }, [isPlaying, totalSteps, speed, steps]);
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
+      playbackIndex.current = initialStepIndex;
       setCurrentStepIndex(initialStepIndex);
       setIsPlaying(false);
     }, 0);
@@ -81,12 +86,14 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
   const weighted = useMemo(() => isWeighted(steps, eventIndex), [steps, eventIndex]);
   const multi = useMemo(() => isMulti(steps, eventIndex), [steps, eventIndex]);
 
+  const replayGraph = useMemo(() => createGraphReplay(steps), [steps]);
+  const replayVectors = useMemo(() => createVectorReplay(steps), [steps]);
   const graphState = useMemo(
-    () => buildGraphState(steps, eventIndex, directed, multi),
-    [steps, eventIndex, directed, multi]
+    () => replayGraph(eventIndex, directed, multi),
+    [replayGraph, eventIndex, directed, multi]
   );
 
-  const vectorState = useMemo(() => buildVectorsState(steps, eventIndex), [steps, eventIndex]);
+  const vectorState = useMemo(() => replayVectors(eventIndex), [replayVectors, eventIndex]);
 
   const caption = useMemo(() => frameCaption(steps, eventIndex), [steps, eventIndex]);
 

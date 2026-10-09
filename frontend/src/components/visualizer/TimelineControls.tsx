@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Play, Pause, SkipBack, RotateCcw, SkipForward } from 'lucide-react';
+import { PLAYBACK_SPEEDS } from '@/lib/playback';
 
 interface TimelineControlsProps {
   currentStep: number;
@@ -30,6 +31,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
 }) => {
   const hasSteps = totalSteps > 0;
   const controlsDisabled = !hasSteps || disabled;
+  const completed = hasSteps && currentStep === totalSteps - 1;
 
   return (
     <div className="timeline-controls">
@@ -80,6 +82,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
         <span className="timeline-step">
           Passo {hasSteps ? currentStep + 1 : 0} / {totalSteps}
         </span>
+        {completed && <span className="timeline-completed" role="status">Concluído</span>}
         <input
           type="range"
           min={0}
@@ -93,18 +96,17 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
       </div>
 
       <div className="timeline-speed">
-        {[0.5, 1, 2, 4].map((s) => (
-          <button
-            type="button"
-            key={s}
-            onClick={() => onSpeedChange(s)}
-            disabled={disabled}
-            className={`timeline-speed-btn ${speed === s ? 'timeline-speed-btn-active' : ''}`}
-            aria-pressed={speed === s}
-          >
-            {s}x
-          </button>
-        ))}
+        <label htmlFor="playback-speed">Velocidade</label>
+        <select
+          id="playback-speed"
+          value={speed}
+          onChange={(event) => onSpeedChange(Number(event.target.value))}
+          disabled={disabled}
+          aria-label="Velocidade de reprodução"
+          className="timeline-speed-select"
+        >
+          {PLAYBACK_SPEEDS.map((value) => <option key={value} value={value}>{value}×</option>)}
+        </select>
       </div>
     </div>
   );

@@ -4,16 +4,21 @@
 #include "visualizer.h"
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <cmath>
 #include <cerrno>
 #include <deque>
+#include <exception>
 #include <iomanip>
 #include <iterator>
 #include <list>
+#include <limits>
 #include <map>
+#include <optional>
 #include <queue>
 #include <set>
 #include <stack>
+#include <tuple>
 #include <streambuf>
 #include <unordered_map>
 #include <unordered_set>
@@ -102,6 +107,12 @@ template<class C, class H, class E, class A> struct sequence<std::unordered_set<
 template<class C, class Traits, class A> struct sequence<std::basic_string<C,Traits,A>> : std::true_type {};
 template<class T> struct pair : std::false_type {};
 template<class A, class B> struct pair<std::pair<A,B>> : std::true_type {};
+template<class T> struct tuple : std::false_type {};
+template<class... T> struct tuple<std::tuple<T...>> : std::true_type {};
+template<class T> struct optional : std::false_type {};
+template<class T> struct optional<std::optional<T>> : std::true_type {};
+template<class T> struct bits : std::false_type {};
+template<size_t N> struct bits<std::bitset<N>> : std::true_type {};
 template<class T> struct mapping : std::false_type {};
 template<class K, class V, class C, class A> struct mapping<std::map<K,V,C,A>> : std::true_type {};
 template<class K, class V, class H, class E, class A> struct mapping<std::unordered_map<K,V,H,E,A>> : std::true_type {};
@@ -113,8 +124,25 @@ template<class T> struct priority : std::false_type {};
 template<class T, class C, class P> struct priority<std::priority_queue<T,C,P>> : std::true_type {};
 template<class T> using bare = std::remove_cv_t<std::remove_reference_t<T>>;
 
+template<class T> inline std::string text(const T& value);
+
+template<size_t I, class T> inline std::string tuple_item(const T& value) {
+    if constexpr (std::is_reference_v<std::tuple_element_t<I, bare<T>>>) {
+        // A tuple can bind a scalar before it is initialized. Do not read it.
+        return std::to_string(I) + " = referência não expandida";
+    } else {
+        return std::to_string(I) + " = " + text(std::get<I>(value));
+    }
+}
+
+template<class T, size_t... I> inline std::vector<std::string> tuple_items(const T& value, std::index_sequence<I...>) {
+    return { tuple_item<I>(value)... };
+}
+
 template<class T> inline std::string text(const T& value) {
-    if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
+    if constexpr (std::is_volatile_v<T>) {
+        return "valor volatile não expandido";
+    } else if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
         std::ostringstream out;
         out.imbue(std::locale::classic());
         if constexpr (std::is_enum_v<T>) out << static_cast<std::underlying_type_t<T>>(value);
@@ -125,35 +153,96 @@ template<class T> inline std::string text(const T& value) {
         return value.substr(0, max_items);
     } else if constexpr (pair<T>::value) {
         return "(" + text(value.first) + ", " + text(value.second) + ")";
+    } else if constexpr (tuple<bare<T>>::value) {
+        constexpr size_t count = std::tuple_size_v<bare<T>>;
+        if constexpr (count > max_items) items_limit();
+        auto items = tuple_items(value, std::make_index_sequence<std::min(count, max_items)>{});
+        std::string result = "(";
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (i) result += ", ";
+            result += items[i];
+        }
+        return result + ")";
+    } else if constexpr (optional<bare<T>>::value) {
+        return value.has_value() ? "valor = " + text(*value) : "sem valor";
+    } else if constexpr (bits<bare<T>>::value) {
+        if (value.size() > max_items) items_limit();
+        std::string result;
+        // Match vector indices: index zero is the least significant bit.
+        for (size_t i = 0; i < std::min(value.size(), max_items); ++i) result += value[i] ? '1' : '0';
+        return result;
     } else {
         return "tipo não expandido";
     }
 }
 
 inline std::map<std::string,std::vector<long double>> vectors;
+inline std::map<std::string,std::vector<std::string>> vector_labels;
+inline std::map<std::string,std::set<int>> found_indices;
+inline std::set<std::string> sorting_vectors;
+inline std::set<std::string> truncated_vectors;
+inline std::set<long double> infinity_values;
 inline std::map<std::string,std::string> structure_cache;
 inline std::map<std::string,std::vector<std::vector<std::string>>> matrix_cache;
 inline int read_line = -1;
 struct Access { std::string name; int index; std::string value; };
 inline std::vector<Access> accesses;
 
-inline void vector_snapshot(const std::string& name, const std::vector<long double>& current, int line) {
+inline bool distance_name(const std::string& name) {
+    return name == "dist" || name == "distance" || name == "distancia";
+}
+
+template<class T> inline std::string distance_label(const std::string& name, const T& value) {
+    if constexpr (std::is_arithmetic_v<T>) {
+        long double number = static_cast<long double>(value);
+        if (distance_name(name) && (number < 0 || number == static_cast<long double>(std::numeric_limits<T>::max()) || infinity_values.count(number))) return "∞";
+    }
+    return "";
+}
+
+inline std::string label_json(const std::string& label) {
+    return label.empty() ? "null" : "\"" + viz::escape_json(label) + "\"";
+}
+
+inline std::string labels_json(const std::vector<std::string>& labels) {
+    std::string json = ",\"value_labels\":[";
+    for (size_t i = 0; i < labels.size(); ++i) {
+        if (i) json += ',';
+        json += label_json(labels[i]);
+    }
+    return json + ']';
+}
+
+inline std::string values_json(const std::vector<long double>& values) {
+    std::ostringstream json;
+    json.imbue(std::locale::classic());
+    json << ",\"values\":[";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i) json << ',';
+        json << std::setprecision(17) << static_cast<double>(values[i]);
+    }
+    json << ']';
+    return json.str();
+}
+
+inline void reset_vector(const std::string& name, int line) {
+    viz::vector_reset(name, line);
+    for (int index : found_indices[name]) viz::vector_mark(name, index, viz::VectorState::Found, line);
+}
+
+inline void vector_snapshot(const std::string& name, const std::vector<long double>& current, int line, const std::vector<std::string>& labels = {}) {
     auto previous = vectors.find(name);
+    const bool labeled = distance_name(name) && labels.size() == current.size();
+    auto label_fields = labeled ? labels_json(labels) : "";
     if (previous == vectors.end() || previous->second.size() != current.size()) {
-        std::ostringstream json;
-        json.imbue(std::locale::classic());
-        json << ",\"values\":[";
-        for (size_t i = 0; i < current.size(); ++i) {
-            if (i) json << ',';
-            json << std::setprecision(17) << static_cast<double>(current[i]);
-        }
-        json << ']';
-        viz::emit_named("VECTOR_INIT", name, json.str(), line);
+        found_indices.erase(name);
+        viz::emit_named("VECTOR_INIT", name, values_json(current) + label_fields, line);
     } else if (previous->second != current) {
         std::vector<size_t> changed;
         for (size_t i = 0; i < current.size(); ++i)
             if (current[i] != previous->second[i]) changed.push_back(i);
-        viz::vector_reset(name, line);
+        for (auto i : changed) found_indices[name].erase(static_cast<int>(i));
+        reset_vector(name, line);
         if (changed.size() == 2 && current[changed[0]] == previous->second[changed[1]] && current[changed[1]] == previous->second[changed[0]]) {
             viz::vector_swap(name, static_cast<int>(changed[0]), static_cast<int>(changed[1]), "Troca de elementos", line);
         } else {
@@ -161,9 +250,14 @@ inline void vector_snapshot(const std::string& name, const std::vector<long doub
                 std::ostringstream fields;
                 fields.imbue(std::locale::classic());
                 fields << ",\"index\":" << i << ",\"value\":" << std::setprecision(17) << static_cast<double>(current[i]);
+                if (labeled) fields << ",\"value_label\":" << label_json(labels[i]);
                 viz::emit_named("VECTOR_SET", name, fields.str(), line);
             }
         }
+    }
+    if (labeled && (!vector_labels.count(name) || vector_labels[name] != labels)) {
+        viz::emit_named("VECTOR_LABELS", name, label_fields, line);
+        vector_labels[name] = labels;
     }
     vectors[name] = current;
 }
@@ -185,6 +279,25 @@ inline Edges graph_edges;
 inline bool graph_directed = true;
 inline bool graph_started = false;
 inline bool graph_weighted = false;
+inline std::set<int> processed_nodes;
+inline std::set<int> reached_nodes;
+inline std::map<int,int> graph_parents;
+inline std::map<std::string,std::vector<int>> graph_paths;
+inline std::map<int,std::string> graph_values;
+
+inline bool has_edge(int u, int v) {
+    if (!graph_directed && u > v) std::swap(u, v);
+    return graph_edges.count({u, v}) != 0;
+}
+
+inline bool valid_path(const std::vector<int>& path) {
+    if (path.empty()) return false;
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (!graph_nodes.count(path[i])) return false;
+        if (i && !has_edge(path[i - 1], path[i])) return false;
+    }
+    return true;
+}
 
 inline void graph_snapshot(const std::string& name, std::set<int> nodes, Edges edges, int line) {
     if (!active_graph.empty() && active_graph != name) return;
@@ -207,6 +320,11 @@ inline void graph_snapshot(const std::string& name, std::set<int> nodes, Edges e
         for (auto node : graph_nodes) viz::remove_node(node, line);
         graph_nodes.clear();
         graph_edges.clear();
+        processed_nodes.clear();
+        reached_nodes.clear();
+        graph_parents.clear();
+        graph_paths.clear();
+        graph_values.clear();
     }
     if (!graph_started || graph_directed != directed) viz::set_directed(directed, line);
     if (!graph_started || graph_weighted != weighted) viz::set_weighted(weighted, line);
@@ -238,22 +356,67 @@ public:
         show_structure("Execução", {"linha " + std::to_string(line)}, line);
         viz::step(caption, line);
         ++frame_count;
+        read_line = -1;
+        accesses.clear();
     }
-    template<class T> void observe(const std::string& name, const T& value) {
+    template<class T> void observe(const std::string& name, const T& value, bool sorting = false) {
         if (!active) return;
         if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
             scalars.push_back(name + " = " + text(value));
+            if constexpr (std::is_arithmetic_v<T>) {
+                if (name == "INF" || name == "inf" || name == "infinity") infinity_values.insert(static_cast<long double>(value));
+            }
         } else if constexpr (sequence<bare<T>>::value) {
             using Item = bare<decltype(*std::begin(value))>;
             if constexpr (std::is_arithmetic_v<Item>) {
+                if (std::size(value) > max_items) truncated_vectors.insert(name);
+                else truncated_vectors.erase(name);
                 std::vector<long double> current;
+                std::vector<std::string> labels;
                 for (auto item : value) {
                     if (current.size() == max_items) { items_limit(); break; }
                     long double n = static_cast<long double>(item);
                     if (!std::isfinite(n)) return;
                     current.push_back(n);
+                    if (distance_name(name)) labels.push_back(distance_label(name, static_cast<Item>(item)));
                 }
-                vector_snapshot(name, current, line);
+                vector_snapshot(name, current, line, labels);
+                if (sorting) sorting_vectors.insert(name);
+                if (graph_started) {
+                    if (name == "path" || name == "caminho" || name == "shortest_path") {
+                        graph_paths.erase(name);
+                        if (truncated_vectors.count(name)) return;
+                        std::vector<int> path;
+                        for (auto item : current) {
+                            if (item < std::numeric_limits<int>::min() || item > std::numeric_limits<int>::max() || std::floor(item) != item) return;
+                            path.push_back(static_cast<int>(item));
+                        }
+                        graph_paths[name] = std::move(path);
+                    } else if (name == "dist" || name == "distance" || name == "distancia" || name == "vis" || name == "visited" || name == "visitado" || name == "seen") {
+                        const bool distance = name == "dist" || name == "distance" || name == "distancia";
+                        for (int id : graph_nodes) {
+                            if (id < 0 || static_cast<size_t>(id) >= current.size()) continue;
+                            auto item = current[id];
+                            bool reached = distance ? item >= 0 && item < static_cast<long double>(std::numeric_limits<Item>::max()) && !infinity_values.count(item) : item != 0;
+                            if (reached && reached_nodes.insert(id).second) viz::graph_node_state(id, viz::NodeState::Queued, line);
+                            if (distance) {
+                                auto badge = reached ? "d=" + text(item) : "∞";
+                                if (graph_values[id] != badge) {
+                                    viz::graph_value(id, badge, line);
+                                    graph_values[id] = badge;
+                                }
+                            }
+                        }
+                    } else if (name == "pai" || name == "parent" || name == "predecessor" || name == "prev") {
+                        for (int id : graph_nodes) {
+                            if (id < 0 || static_cast<size_t>(id) >= current.size()) continue;
+                            auto parent = current[id];
+                            if (parent < std::numeric_limits<int>::min() || parent > std::numeric_limits<int>::max() || std::floor(parent) != parent) continue;
+                            if (has_edge(static_cast<int>(parent), id)) graph_parents[id] = static_cast<int>(parent);
+                            else graph_parents.erase(id);
+                        }
+                    }
+                }
             } else if constexpr (sequence<Item>::value) {
                 using Cell = bare<decltype(*std::begin(*std::begin(value)))>;
                 if constexpr (std::is_arithmetic_v<Cell>) {
@@ -274,7 +437,7 @@ public:
                         matrix_cache[name] = std::move(rows);
                     }
                 }
-            } else if constexpr (pair<Item>::value || std::is_same_v<Item,std::string>) {
+            } else if constexpr (pair<Item>::value || tuple<Item>::value || optional<Item>::value || bits<Item>::value || std::is_same_v<Item,std::string>) {
                 std::vector<std::string> items;
                 for (const auto& item : value) {
                     if (items.size() == max_items) { items_limit(); break; }
@@ -282,6 +445,17 @@ public:
                 }
                 show_structure(name,items,line);
             }
+        } else if constexpr (bits<bare<T>>::value) {
+            std::vector<long double> current;
+            if (value.size() > max_items) items_limit();
+            for (size_t i = 0; i < std::min(value.size(), max_items); ++i) current.push_back(value[i] ? 1 : 0);
+            vector_snapshot(name, current, line);
+        } else if constexpr (tuple<bare<T>>::value) {
+            constexpr size_t count = std::tuple_size_v<bare<T>>;
+            if constexpr (count > max_items) items_limit();
+            show_structure(name, tuple_items(value, std::make_index_sequence<std::min(count, max_items)>{}), line);
+        } else if constexpr (optional<bare<T>>::value) {
+            show_structure(name, {text(value)}, line);
         } else if constexpr (mapping<bare<T>>::value) {
             std::vector<std::string> items;
             for (const auto& item : value) {
@@ -370,13 +544,15 @@ template<class C,class I> decltype(auto) read(const char* name, C& container, I 
         const auto size = std::size(container);
         if (index >= 0 && static_cast<size_t>(index) < std::min<size_t>(size,max_items) && vectors.count(name)) {
             if (read_line != line) {
-                for (const auto& entry : vectors) viz::vector_reset(entry.first,line);
+                for (const auto& entry : vectors) reset_vector(entry.first,line);
                 read_line = line;
                 accesses.clear();
             }
             viz::vector_mark(name,static_cast<int>(index),viz::VectorState::Comparing,line);
             auto value = text(container[index]);
             using Item = bare<decltype(container[index])>;
+            auto label = distance_label(name, container[index]);
+            if (!label.empty()) value = label;
             if constexpr (std::is_same_v<Item,char>) {
                 auto ch = container[index];
                 if (ch >= 32 && ch < 127) value = "'" + std::string(1,ch) + "'";
@@ -387,7 +563,8 @@ template<class C,class I> decltype(auto) read(const char* name, C& container, I 
             viz::step(caption,line);
             ++frame_count;
         } else if (active_graph == name && graph_nodes.count(static_cast<int>(index))) {
-            viz::reset_colors(line);
+            for (int id : processed_nodes) viz::graph_node_state(id, viz::NodeState::Done, line);
+            processed_nodes.insert(static_cast<int>(index));
             viz::highlight(static_cast<int>(index),"orange",line);
             viz::step("Processa vértice " + std::to_string(index),line);
             ++frame_count;
@@ -396,13 +573,19 @@ template<class C,class I> decltype(auto) read(const char* name, C& container, I 
     return container[index];
 }
 
-inline bool condition(bool value, int line) {
+inline bool condition(bool value, int line, bool search = false) {
     if (enabled()) {
         std::string caption = value ? "Condição verdadeira" : "Condição falsa";
         if (read_line == line && accesses.size() == 2) {
             const auto& a = accesses[0]; const auto& b = accesses[1];
             caption = "Compara " + a.name + "[" + std::to_string(a.index) + "] = " + a.value + " com " + b.name + "[" + std::to_string(b.index) + "] = " + b.value + (value ? ": verdadeiro" : ": falso");
             if (a.name == b.name) viz::vector_compare(a.name,a.index,b.index,caption,line);
+        }
+        if (search && value && read_line == line && accesses.size() == 1) {
+            const auto& access = accesses[0];
+            found_indices[access.name].insert(access.index);
+            viz::vector_mark(access.name, access.index, viz::VectorState::Found, line);
+            caption = "Valor encontrado em " + access.name + "[" + std::to_string(access.index) + "]";
         }
         viz::step(caption,line);
         ++frame_count;
@@ -417,13 +600,17 @@ template<class C,class I> void written(const char* name, const C& container, I i
     if constexpr (std::is_arithmetic_v<Item>) {
         long double value = static_cast<long double>(container[index]);
         if (!std::isfinite(value)) return;
-        std::string caption = std::string("Atualiza ") + name + "[" + std::to_string(index) + "] = " + text(container[index]);
+        auto label = distance_label(name, container[index]);
+        std::string caption = std::string("Atualiza ") + name + "[" + std::to_string(index) + "] = " + (label.empty() ? text(container[index]) : label);
         std::ostringstream fields;
         fields.imbue(std::locale::classic());
         fields << ",\"index\":" << index << ",\"value\":" << std::setprecision(17) << static_cast<double>(value);
-        viz::vector_reset(name,line);
+        if (distance_name(name)) fields << ",\"value_label\":" << label_json(label);
+        found_indices[name].erase(static_cast<int>(index));
+        reset_vector(name,line);
         viz::emit_named("VECTOR_SET",name,fields.str()+viz::caption_field(caption),line);
         vectors[name][index] = value;
+        if (vector_labels.count(name) && static_cast<size_t>(index) < vector_labels[name].size()) vector_labels[name][index] = label;
         viz::step(caption,line);
         ++frame_count;
     }
@@ -437,12 +624,46 @@ inline void match(const char* text_name, const char* pattern_name, int position,
     for (int i=0; i<length; ++i) if (a->second[position+i] != b->second[i]) return;
     viz::vector_reset(text_name,line); viz::vector_reset(pattern_name,line);
     for (int i=0; i<length; ++i) {
+        found_indices[text_name].insert(position+i);
+        found_indices[pattern_name].insert(i);
         viz::vector_mark(text_name,position+i,viz::VectorState::Found,line);
         viz::vector_mark(pattern_name,i,viz::VectorState::Found,line);
     }
     viz::step("Padrão encontrado na posição " + std::to_string(position),line);
     ++frame_count;
 }
+
+inline void finish() {
+    if (!enabled()) return;
+    for (const auto& entry : vectors) {
+        reset_vector(entry.first, 0);
+        const auto& values = entry.second;
+        if (sorting_vectors.count(entry.first) && !truncated_vectors.count(entry.first) &&
+            (std::is_sorted(values.begin(), values.end()) || std::is_sorted(values.rbegin(), values.rend()))) {
+            for (size_t i = 0; i < values.size(); ++i) viz::vector_mark(entry.first, static_cast<int>(i), viz::VectorState::Sorted, 0);
+        }
+        auto label_fields = vector_labels.count(entry.first) ? labels_json(vector_labels[entry.first]) : "";
+        viz::emit_named("VECTOR_RESULT", entry.first, values_json(values) + label_fields + viz::caption_field("Execução concluída"), 0);
+    }
+    for (int id : processed_nodes) if (graph_nodes.count(id)) viz::graph_node_state(id, viz::NodeState::Done, 0);
+    for (int id : reached_nodes) if (graph_nodes.count(id)) viz::graph_node_state(id, viz::NodeState::Done, 0);
+    for (const auto& entry : graph_parents) if (has_edge(entry.second, entry.first)) viz::graph_edge_state(entry.second, entry.first, viz::EdgeState::Tree, 0);
+    bool path_found = false;
+    for (const auto& entry : graph_paths) {
+        if (!valid_path(entry.second)) continue;
+        path_found = true;
+        for (size_t i = 0; i < entry.second.size(); ++i) viz::vector_mark(entry.first, static_cast<int>(i), viz::VectorState::Found, 0);
+        viz::event_stream() << "{\"step_event\":\"GRAPH_PATH\",\"path\":" << viz::integers_json(entry.second) << ",\"color\":\"green\",\"line\":0}\n";
+    }
+    show_structure("Execução", {"concluída"}, 0);
+    viz::step(path_found ? "Execução concluída — caminho encontrado" : "Execução concluída", 0);
+    ++frame_count;
+}
+
+class Completion {
+public:
+    ~Completion() { if (std::uncaught_exceptions() == 0) finish(); }
+};
 
 } // namespace runspect_auto
 #endif

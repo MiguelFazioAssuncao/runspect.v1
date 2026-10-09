@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   boundedOperation, createRecordingPlan, frameTiming, MAX_ENCODED_BYTES,
-  recordVisualization, RecordingStopped, waitForEncoderCapacity,
+  recordVisualization, RecordingStopped, stepTiming, waitForEncoderCapacity,
 } from './recording';
 
-const muxers = vi.hoisted(() => ({ options: [] as { fastStart: { expectedVideoChunks: number } }[], finalized: 0, chunks: 0 }));
+const muxers = vi.hoisted(() => ({ timings: [] as { timestamp: number; duration: number }[], options: [] as { fastStart: { expectedVideoChunks: number } }[], finalized: 0, chunks: 0 }));
 vi.mock('mp4-muxer', () => ({
   ArrayBufferTarget: class { buffer = new ArrayBuffer(16); },
   Muxer: class {
     constructor(options: { fastStart: { expectedVideoChunks: number } }) { muxers.options.push(options); }
-    addVideoChunk() { muxers.chunks++; }
+    addVideoChunkRaw(_data: Uint8Array, _type: string, timestamp: number, duration: number) { muxers.chunks++; muxers.timings.push({ timestamp, duration }); }
     finalize() { muxers.finalized++; }
   },
 }));
@@ -37,10 +37,10 @@ class FakeEncoder extends EventTarget {
     FakeEncoder.instances.push(this);
   }
   configure() { this.state = 'configured'; }
-  encode() {
+  encode(frame: FakeFrame) {
     this.frames++;
     if (this.main) FakeEncoder.mainEncode?.(this);
-    this.callbacks.output({ byteLength: 10 } as EncodedVideoChunk, {});
+    this.callbacks.output({ byteLength: 10, timestamp: frame.timing.timestamp, duration: frame.timing.duration, type: 'key', copyTo() {} } as unknown as EncodedVideoChunk, {});
   }
   flush() { return this.main && FakeEncoder.hangFlush ? new Promise<void>(() => {}) : Promise.resolve(); }
   close() { this.state = 'closed'; }
@@ -61,6 +61,7 @@ function options() {
 
 beforeEach(() => {
   muxers.options = [];
+  muxers.timings = [];
   muxers.finalized = 0;
   muxers.chunks = 0;
   FakeEncoder.instances = [];
@@ -150,19 +151,19 @@ describe('exportação MP4', () => {
     expect(input.capture.mock.calls.map(([step]) => step)).toEqual([0, 1]);
     expect(result?.blob.type).toBe('video/mp4');
     expect(result?.partial).toBe(false);
-    expect(result?.frames).toBe(input.plan.totalFrames);
+    expect(result?.frames).toBe(input.plan.steps + 2);
     expect(FakeFrame.instances.every((frame) => frame.closed)).toBe(true);
     expect(FakeEncoder.instances.every((encoder) => encoder.state === 'closed')).toBe(true);
-    expect(muxers.options[0].fastStart.expectedVideoChunks).toBe(input.plan.totalFrames);
+    expect(muxers.options[0].fastStart.expectedVideoChunks).toBe(input.plan.steps + 2);
     expect(muxers.finalized).toBe(1);
   });
 
   it('preserva um arquivo parcial sem adicionar pausa após Parar', async () => {
     const input = options();
-    FakeEncoder.mainEncode = (encoder) => { if (encoder.frames === 3) input.stopController.abort(new RecordingStopped()); };
+    FakeEncoder.mainEncode = (encoder) => { if (encoder.frames === 1) input.stopController.abort(new RecordingStopped()); };
     const result = await recordVisualization(input);
     expect(result?.partial).toBe(true);
-    expect(result?.frames).toBe(3);
+    expect(result?.frames).toBe(1);
     expect(muxers.finalized).toBe(1);
   });
 
@@ -244,4 +245,110 @@ describe('exportação MP4', () => {
     expect(muxers.chunks).toBe(0);
     expect(muxers.finalized).toBe(0);
   });
+});
+
+
+describe('temporização e progresso reais', () => {
+  it.each([0.5, 1, 2, 4, 8, 32, 128])('mantém todos os passos a %sx sem arredondamento por passo', async speed => {
+    const input = options();
+    input.plan = createRecordingPlan(7, speed, 640, 360);
+    const result = await recordVisualization(input);
+    expect(muxers.timings).toHaveLength(9);
+    muxers.timings.slice(0, 7).forEach((timing, index) => expect(timing).toEqual(stepTiming(input.plan, index)));
+    for (let index = 1; index < muxers.timings.length; index++) {
+      const previous = muxers.timings[index - 1];
+      expect(muxers.timings[index].timestamp).toBe(previous.timestamp + previous.duration);
+    }
+    const last = muxers.timings.at(-1)!;
+    expect(last.timestamp + last.duration).toBe(Math.round((7 / speed + 1) * 1_000_000));
+    expect(result?.metrics.captures).toBe(7);
+    expect(result?.metrics.samples).toBe(9);
+  });
+
+  it('não anuncia 100% antes de flush e exportação', async () => {
+    const input = options();
+    await recordVisualization(input);
+    const statuses = input.onStatus.mock.calls.map(([status]) => status);
+    expect(statuses.some(status => status.phase === 'finalizing')).toBe(true);
+    expect(statuses.every(status => status.progress === undefined || status.progress < 1)).toBe(true);
+  });
+
+  it('descarta flush pendente e permite outra sessão após cancelar a finalização', async () => {
+    const input = options();
+    FakeEncoder.hangFlush = true;
+    input.onStatus.mockImplementation(status => {
+      if (status.phase === 'finalizing') input.disposeController.abort(new RecordingStopped());
+    });
+    await expect(recordVisualization(input)).rejects.toBeInstanceOf(RecordingStopped);
+    expect(muxers.finalized).toBe(0);
+    expect(FakeEncoder.instances.every(encoder => encoder.state === 'closed')).toBe(true);
+    FakeEncoder.instances = [];
+    FakeEncoder.hangFlush = false;
+    expect((await recordVisualization(options()))?.blob.size).toBeGreaterThan(0);
+  });
+
+  it('rejeita capturas vazias e ainda libera o canvas', async () => {
+    const input = options(); const bitmap = canvas(); bitmap.width = 0;
+    input.capture.mockResolvedValue(bitmap);
+    await expect(recordVisualization(input)).rejects.toThrow('quadro vazio');
+    expect(bitmap.height).toBe(0);
+    expect(muxers.finalized).toBe(0);
+  });
+
+  it('não finaliza quando flush perde um quadro', async () => {
+    const original = FakeEncoder.prototype.encode;
+    const spy = vi.spyOn(FakeEncoder.prototype, 'encode').mockImplementation(function (this: FakeEncoder, frame: FakeFrame) {
+      if (this.main && this.frames === 0) { this.frames++; return; }
+      original.call(this, frame);
+    });
+    try { await expect(recordVisualization(options())).rejects.toThrow('não concluiu'); }
+    finally { spy.mockRestore(); }
+    expect(muxers.finalized).toBe(0);
+  });
+});
+
+describe('falhas e limpeza de esperas', () => {
+  it('rejeita codecs indisponíveis e permite iniciar novamente', async () => {
+    FakeEncoder.unsupported = true;
+    await expect(recordVisualization(options())).rejects.toThrow('Nenhum encoder');
+    FakeEncoder.unsupported = false;
+    expect((await recordVisualization(options()))?.frames).toBe(4);
+  });
+  it('libera o listener de dequeue ao cancelar uma fila saturada', async () => {
+    const encoder = new FakeEncoder({output() {},error() {}}); encoder.encodeQueueSize = 8;
+    const dispose = new AbortController(); const remove = vi.spyOn(encoder,'removeEventListener');
+    const waiting = waitForEncoderCapacity(encoder as unknown as VideoEncoder,[dispose.signal]);
+    dispose.abort(new RecordingStopped());
+    await expect(waiting).rejects.toBeInstanceOf(RecordingStopped);
+    expect(remove).toHaveBeenCalledWith('dequeue',expect.any(Function));
+  });
+  it('limita captura travada, fecha recursos e libera resultados tardios', async () => {
+    vi.useFakeTimers();
+    const input = options(); let finish: (bitmap: HTMLCanvasElement) => void = () => {};
+    input.capture.mockImplementation(() => new Promise(resolve => {finish = resolve;}));
+    const assertion = expect(recordVisualization(input)).rejects.toThrow('tempo de espera');
+    await vi.runAllTimersAsync(); await assertion;
+    const bitmap = canvas(); finish(bitmap); await Promise.resolve();
+    expect([bitmap.width,bitmap.height]).toEqual([0,0]);
+    expect(FakeEncoder.instances.every(encoder => encoder.state === 'closed')).toBe(true);
+    expect(muxers.finalized).toBe(0);
+  });
+});
+
+it('mantém o progresso monotônico quando os chunks chegam só no flush', async () => {
+  const pending: FakeFrame[] = [];
+  const originalEncode = FakeEncoder.prototype.encode;
+  const originalFlush = FakeEncoder.prototype.flush;
+  const encode = vi.spyOn(FakeEncoder.prototype,'encode').mockImplementation(function(this: FakeEncoder, frame: FakeFrame) {
+    if(this.main) {this.frames++;pending.push(frame);} else originalEncode.call(this,frame);
+  });
+  const flush = vi.spyOn(FakeEncoder.prototype,'flush').mockImplementation(function(this: FakeEncoder) {
+    if(this.main) for(const frame of pending) this.callbacks.output({byteLength:10,timestamp:frame.timing.timestamp,type:'key',copyTo() {}} as unknown as EncodedVideoChunk,{});
+    return originalFlush.call(this);
+  });
+  const input = options();
+  try {await recordVisualization(input);} finally {encode.mockRestore();flush.mockRestore();}
+  const progress = input.onStatus.mock.calls.map(([status])=>status.progress).filter(value=>value!==undefined);
+  for(let index=1;index<progress.length;index++) expect(progress[index]).toBeGreaterThanOrEqual(progress[index-1]);
+  expect(progress.every(value=>value<1)).toBe(true);
 });

@@ -18,8 +18,29 @@ disponíveis pela linha do tempo e pelo botão Reiniciar.
 - Consultas `a[i]`, comparações em condições, alterações de elementos e
   trocas identificadas pelo estado anterior e posterior do vetor.
 - Matrizes numéricas, pares, mapas, filas e pilhas de tipos suportados.
+- Tuplas (`std::tuple`) com elementos identificados pelo índice, resultados
+  opcionais (`std::optional`) vazios ou com valor e máscaras `std::bitset`
+  como vetores de zeros e uns. Os bits começam pelo índice 0, o menos
+  significativo; `to_string()` imprime na ordem inversa.
 - Funções comuns, blocos, laços, condições e lambdas com corpo não vazio.
   As linhas dos eventos continuam referindo-se ao código original.
+- `switch`, incluindo casos encadeados, `default`, blocos por caso e
+  `[[fallthrough]]`. A seleção mantém seu tipo original e é avaliada uma
+  única vez. Cada caso alcançado aparece na linha do tempo.
+
+Tuplas e opcionais expandem números, enums, strings, pares e combinações
+destes com tuplas e opcionais. Elementos de tipos personalizados continuam
+com a indicação `tipo não expandido`, sem copiar o objeto ou chamar seus
+operadores. Elementos de referência em tuplas mostram `referência não
+expandida` para evitar ler um escalar ainda não inicializado. Valores
+`volatile` aninhados também não são lidos. Sequências
+de tuplas, opcionais e bitsets também aparecem no painel de estruturas.
+
+Uma declaração como `case 0: int x;` pode ser saltada por outro caso. Esses
+escalares sem inicialização no escopo compartilhado não são observados, e
+o backend informa esse limite. Use `case 0: { int x; ... }` para acompanhar
+a variável dentro do seu bloco. Saltos com `goto` e exceções continuam com
+acompanhamento parcial.
 
 Vetores numéricos construídos de uma string com `s.begin(), s.end()` podem
 ser usados como sua representação visual. Por exemplo, o KMP pode comparar
@@ -27,6 +48,33 @@ ser usados como sua representação visual. Por exemplo, o KMP pode comparar
 O padrão de cálculo `pos = i - m + 1` também é reconhecido quando `m` vem
 do tamanho do padrão. Antes de destacar uma correspondência, o runtime
 confere os elementos reais do texto e do padrão.
+
+## Destaques de resultado
+
+Uma condição direta `a[i] == alvo` verdadeira destaca o elemento encontrado
+em verde. Esse destaque permanece nas leituras seguintes e no quadro final,
+até que o valor seja alterado ou a estrutura seja reinicializada. As marcas
+de correspondência de strings também são preservadas.
+
+Ao terminar normalmente `main`, a instrumentação emite um quadro de conclusão
+e os valores finais dos vetores. Vetores usados em `sort`/`stable_sort`, ou
+alterados após comparações entre suas posições, recebem a marca de ordenado
+somente quando a sequência final estiver em ordem crescente ou decrescente.
+
+Em grafos, `dist`/`distance`/`distancia` mostram distâncias e
+`vis`/`visited`/`visitado`/`seen` indicam vértices alcançados. Valores negativos,
+o máximo do tipo e constantes `INF`/`inf`/`infinity` são tratados como
+distâncias inalcançáveis. Elas também aparecem como `∞` nas
+células do vetor, nas legendas de leitura/escrita e no resultado final.
+Os eventos preservam o valor numérico original e acrescentam rótulos de
+exibição; valores grandes que não sejam sentinelas continuam sendo números.
+`pai`/`parent`/`predecessor`/`prev` destacam a árvore
+de descoberta. Vetores `caminho`/`path`/`shortest_path` destacam nós e arestas
+em verde no quadro final, após validar que os vértices e as conexões existem
+no sentido correto. Outros nomes ou representações podem usar a API manual.
+
+O limite de passos continua valendo: uma trace truncada não recebe um
+quadro de resultado inferido após atingir o limite.
 
 ## Reconhecimento de grafos
 
@@ -55,7 +103,7 @@ são expandidos automaticamente.
 
 Esta implementação não produz a mesma explicação semântica de um exemplo
 anotado manualmente para qualquer C++. Funções `constexpr`, templates,
-`switch`, `goto` e exceções têm acompanhamento parcial. Se a análise ou a
+`goto` e exceções têm acompanhamento parcial. Se a análise ou a
 compilação instrumentada não for compatível com uma construção aceita pelo
 GCC, o backend executa o código original e informa que a visualização ficou
 indisponível, sem apresentar uma sequência inventada.
@@ -90,3 +138,36 @@ com `go run` continua usando o binário anterior enquanto estiver ativo.
 
 Código com chamadas à API `viz` usa o modo manual. Seus eventos e a
 exportação para C++ puro continuam disponíveis.
+
+## Desempenho no deploy
+
+O Dockerfile prepara headers pré-compilados da biblioteca padrão para Clang
+e GCC durante o build. A análise usa esse cache quando o primeiro include
+do código é `<bits/stdc++.h>`, sem macros anteriores; códigos diferentes
+seguem a análise normal. Um cache Clang incompatível tem fallback para a
+análise normal. O diretório `RUNSPECT_CPP_CACHE` é exposto somente para
+leitura no sandbox de análise e compilação. Os PCHs devem ser reconstruídos
+junto com a imagem quando o compilador ou os headers mudarem. A camada Docker
+desses headers é reutilizada quando apenas o servidor Go ou o runtime de
+visualização muda. Os PCHs aumentam o tamanho da imagem e têm um custo de
+geração no build, em troca de menos trabalho a cada execução de C++.
+
+A compilação usa `-O0` para priorizar o tempo de resposta do visualizador.
+Isso reduz o trabalho de otimização do compilador, mas programas pesados
+podem executar mais lentamente; o limite de execução continua em 3 segundos.
+Até 8 binários são reutilizados em um cache em memória limitado a 16 MiB.
+Cada execução usa o stdin atual e os mesmos limites de sandbox. Alterações
+no código, headers e instrumentador invalidam a entrada; indisponibilidade
+temporária da análise não é armazenada. O cache se perde ao reiniciar o
+serviço, sem depender de disco persistente do provedor.
+
+`RUNSPECT_ANALYSIS_TIMEOUT_SEC` controla a análise separadamente da
+compilação (`RUNSPECT_COMPILE_TIMEOUT_SEC`). No Docker, ambos permitem
+30 segundos e `RUNSPECT_MAX_CONCURRENT=1` evita que vários compiladores
+disputem os recursos do plano gratuito. A compilação de fallback recebe
+um orçamento próprio. O timeout de escrita HTTP cobre todas essas etapas.
+
+`time_ms` mede o processo completo no backend, incluindo análise e
+compilação; não mede apenas o algoritmo e não inclui o tempo de despertar
+um serviço suspenso pelo provedor. Depois destas alterações, faça um novo
+deploy do backend com rebuild da imagem Docker para gerar os PCHs.

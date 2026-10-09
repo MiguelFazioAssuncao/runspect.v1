@@ -87,6 +87,10 @@ describe('programas independentes C++17', () => {
     ['binary-exponentiation', '9000000000000000000 2 9000000000000000001\n', '1\n'],
     ['euclidean-gcd', '0 0\n', '0\n'],
     ['euclidean-gcd', '0 18\n', '18\n'],
+    ['tuple-optional', '0\n', 'SEM RESULTADO\n'],
+    ['tuple-optional', '3\n7 -4\n8 -2\n9 -2\n', '8 -2\n'],
+    ['bitset-switch', '0\n', '00000000\n'],
+    ['bitset-switch', '6\n1 7\n3 0\n2 7\n1 8\n9 3\n1 -1\n', '00000001\n'],
   ])('%s trata a entrada de borda %#', (id, stdin, expected) => {
     expect(run(id, stdin)).toBe(expected);
   });

@@ -26,6 +26,20 @@ const render = (vectors: VectorSnapshot[], issues: { event: number; step_event: 
   renderToStaticMarkup(createElement(VectorSortPanel, { vectors, issues }));
 
 describe('VectorSortPanel', () => {
+  it('exibe distância inalcançável como infinito nas células, operação e resultado', () => {
+    const infinity = 9223372036854776000;
+    const html = render([snapshot({
+      name: 'dist',
+      items: [{ index: 0, value: 0, state: 'default' }, { index: 1, value: infinity, displayValue: '∞', state: 'active' }],
+      operation: { kind: 'set', index: 1, value: infinity },
+      result: [0, infinity], range: null, pivot: null, caption: '',
+    })]);
+    expect(html).not.toContain(String(infinity));
+    expect(html).toContain('escrita: [1] = ∞');
+    expect(html).toContain('resultado: 0, ∞');
+    expect(html).toContain('1: ∞ (ativo)');
+  });
+
   it('renderiza índice, valor, estado, intervalo, pivô, operação e legenda', () => {
     const html = render([snapshot()]);
     expect(html).toContain('vector-cell-comparing');

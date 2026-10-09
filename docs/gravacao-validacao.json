@@ -1,0 +1,381 @@
+{
+  "date": "2026-10-09",
+  "environment": "Chromium, Next development, 682x606, single successful observations; timings exclude download",
+  "before_graph80": {
+    "kind": "graph",
+    "count": 80,
+    "speed": 1,
+    "layout": "force",
+    "status": "Gravação concluída. MP4 disponível.\nBaixar MP4",
+    "measurements": {
+      "recording:total": 14461,
+      "recording:prepare": 78.39999999990687,
+      "recording:capture": 9590.200000002515,
+      "recording:encode": 2501.9999999990687,
+      "recording:flush": 40.89999999990687,
+      "recording:export": 4.400000000372529
+    },
+    "video": {
+      "duration": 81,
+      "width": 682,
+      "height": 606
+    }
+  },
+  "before_vector8_half_speed": {
+    "kind": "vector",
+    "count": 8,
+    "speed": 0.5,
+    "layout": "force",
+    "status": "Gravação concluída. MP4 disponível.\nBaixar MP4",
+    "measurements": {
+      "recording:total": 2504.5,
+      "recording:prepare": 73.89999999990687,
+      "recording:capture": 1270.6999999997206,
+      "recording:encode": 872.1000000000931,
+      "recording:flush": 34.40000000037253,
+      "recording:export": 0.7999999998137355
+    },
+    "video": {
+      "duration": 17,
+      "width": 682,
+      "height": 606
+    }
+  },
+  "after": [
+    {
+      "kind": "vector",
+      "count": 8,
+      "speed": 1,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 0.9 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 923.8999999999069,
+        "recording:prepare": 56.40000000037253,
+        "recording:capture": 763.9999999990687,
+        "recording:render": 217.8999999994412,
+        "recording:serialize": 27.100000000558794,
+        "recording:encode": 6.900000000372529,
+        "recording:flush": 22.09999999962747,
+        "recording:export": 3.5
+      },
+      "video": {
+        "duration": 9,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "vector",
+      "count": 80,
+      "speed": 1,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 5.0 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 4998.200000000186,
+        "recording:prepare": 57.8000000002794,
+        "recording:render": 1336.2000000001863,
+        "recording:capture": 4395.5999999996275,
+        "recording:serialize": 178.99999999906868,
+        "recording:encode": 56.100000001490116,
+        "recording:flush": 15.800000000279397,
+        "recording:export": 1.5
+      },
+      "video": {
+        "duration": 81,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "vector",
+      "count": 8,
+      "speed": 4,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 0.7 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 685,
+        "recording:prepare": 42.90000000037253,
+        "recording:render": 167.3999999994412,
+        "recording:capture": 576.5,
+        "recording:serialize": 18.300000000745058,
+        "recording:encode": 5.600000000093132,
+        "recording:flush": 14.899999999906868,
+        "recording:export": 1.1000000000931323
+      },
+      "video": {
+        "duration": 3,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "vector",
+      "count": 8,
+      "speed": 0.5,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 0.4 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 429.09999999962747,
+        "recording:prepare": 44,
+        "recording:render": 88.00000000046566,
+        "recording:capture": 302.70000000018626,
+        "recording:serialize": 17.49999999953434,
+        "recording:encode": 4.900000000372529,
+        "recording:flush": 16.399999999906868,
+        "recording:export": 1.2999999998137355
+      },
+      "video": {
+        "duration": 17,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "graph",
+      "count": 8,
+      "speed": 2,
+      "layout": "circular",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 0.6 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 596.5,
+        "recording:prepare": 51.09999999962747,
+        "recording:render": 140.6000000005588,
+        "recording:capture": 483.70000000018626,
+        "recording:serialize": 16.5,
+        "recording:encode": 5.000000000465661,
+        "recording:flush": 14.299999999813735,
+        "recording:export": 1.1000000000931323
+      },
+      "video": {
+        "duration": 5,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "graph",
+      "count": 80,
+      "speed": 1,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 5.0 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 4961.600000000093,
+        "recording:prepare": 50.60000000009313,
+        "recording:render": 1270.8999999994412,
+        "recording:capture": 4445.799999998417,
+        "recording:serialize": 163.59999999962747,
+        "recording:encode": 51.29999999795109,
+        "recording:flush": 19.300000000279397,
+        "recording:export": 2.3999999999068677
+      },
+      "video": {
+        "duration": 81,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "vector",
+      "count": 80,
+      "speed": 8,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 4.1 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 4067.7999999998137,
+        "recording:prepare": 42.60000000009313,
+        "recording:render": 869.7999999988824,
+        "recording:capture": 3563.6999999983236,
+        "recording:serialize": 163.3000000002794,
+        "recording:encode": 50.70000000158325,
+        "recording:flush": 12.200000000186265,
+        "recording:export": 1.1999999997206032
+      },
+      "video": {
+        "duration": 11,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "vector",
+      "count": 80,
+      "speed": 128,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 3.1 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 3143.2999999998137,
+        "recording:prepare": 36.60000000009313,
+        "recording:render": 651.2999999960884,
+        "recording:capture": 2625.799999999348,
+        "recording:serialize": 159.80000000540167,
+        "recording:encode": 52.000000002328306,
+        "recording:flush": 11,
+        "recording:export": 1.5
+      },
+      "video": {
+        "duration": 1.625,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "graph",
+      "count": 80,
+      "speed": 4,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 4.8 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 4832.700000000186,
+        "recording:prepare": 42.6999999997206,
+        "recording:render": 1095.200000000652,
+        "recording:capture": 4276.799999996088,
+        "recording:serialize": 170.79999999841675,
+        "recording:encode": 52.09999999916181,
+        "recording:flush": 13.900000000372529,
+        "recording:export": 1.5
+      },
+      "video": {
+        "duration": 21,
+        "width": 682,
+        "height": 606
+      }
+    }
+  ],
+  "decoded": [
+    {
+      "file": "validated-graph-8-2-circular.mp4",
+      "codec": "avc1",
+      "duration": 5,
+      "samples": 10,
+      "decoded": 10
+    },
+    {
+      "file": "validated-graph-80-1-force.mp4",
+      "codec": "avc1",
+      "duration": 81,
+      "samples": 82,
+      "decoded": 82
+    },
+    {
+      "file": "validated-graph-80-4-force.mp4",
+      "codec": "avc1",
+      "duration": 21,
+      "samples": 82,
+      "decoded": 82
+    },
+    {
+      "file": "validated-vector-8-0.5-force.mp4",
+      "codec": "avc1",
+      "duration": 17,
+      "samples": 10,
+      "decoded": 10
+    },
+    {
+      "file": "validated-vector-8-1-force.mp4",
+      "codec": "avc1",
+      "duration": 9,
+      "samples": 10,
+      "decoded": 10
+    },
+    {
+      "file": "validated-vector-8-4-force.mp4",
+      "codec": "avc1",
+      "duration": 3,
+      "samples": 10,
+      "decoded": 10
+    },
+    {
+      "file": "validated-vector-80-1-force.mp4",
+      "codec": "avc1",
+      "duration": 81,
+      "samples": 82,
+      "decoded": 82
+    },
+    {
+      "file": "validated-vector-80-128-force.mp4",
+      "codec": "avc1",
+      "duration": 1.625,
+      "samples": 82,
+      "decoded": 82
+    },
+    {
+      "file": "validated-vector-80-8-force.mp4",
+      "codec": "avc1",
+      "duration": 11,
+      "samples": 82,
+      "decoded": 82
+    }
+  ],
+  "fallback_decoded": [
+    {
+      "file": "codec-av1-vector-8-4-force.mp4",
+      "codec": "av01",
+      "duration": 3,
+      "samples": 10,
+      "decoded": 10
+    },
+    {
+      "file": "codec-vp9-vector-8-4-force.mp4",
+      "codec": "vp09",
+      "duration": 3,
+      "samples": 10,
+      "decoded": 10
+    }
+  ],
+  "lifecycle": [
+    "cancel during preparation: no empty download, controls restored, resources closed",
+    "cancel during capture: playable partial MP4 10s",
+    "capture error: no download, controls restored, resources closed",
+    "encoder error: no download, controls restored, resources closed",
+    "cancel stalled flush: no stale download, controls restored, resources closed",
+    "new recording after all failures: successful",
+    "page exit during finalization: no late download"
+  ],
+  "synchronization": [
+    {
+      "kind": "vector",
+      "count": 80,
+      "speed": 128,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 5.0 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 4975.699999999721,
+        "recording:prepare": 52.6999999997206,
+        "recording:capture": 4445.299999998417,
+        "recording:render": 1205.699999997858,
+        "recording:serialize": 188.4000000017695,
+        "recording:encode": 55.29999999841675,
+        "recording:flush": 9.399999999906868,
+        "recording:export": 2.6999999997206032
+      },
+      "video": {
+        "duration": 1.625,
+        "width": 682,
+        "height": 606
+      }
+    },
+    {
+      "kind": "graph",
+      "count": 80,
+      "speed": 4,
+      "layout": "force",
+      "status": "Gravação concluída. MP4 disponível. Gerado em 6.2 s.\nBaixar MP4",
+      "measurements": {
+        "recording:total": 6239.299999999814,
+        "recording:prepare": 75.39999999990687,
+        "recording:render": 1660.0999999996275,
+        "recording:capture": 5650.500000000466,
+        "recording:serialize": 191.90000000037253,
+        "recording:encode": 54.90000000083819,
+        "recording:flush": 13.600000000093132,
+        "recording:export": 1.6000000000931323
+      },
+      "video": {
+        "duration": 21,
+        "width": 682,
+        "height": 606
+      }
+    }
+  ],
+  "reproduction_notes": "Preparation race reproduced in previous version. Vector80 final baseline attempts failed; no reliable final before/after for that case. Capture/encoder/flush stalls were injected, not spontaneously observed."
+}

@@ -82,6 +82,15 @@ describe('graphReducer semantic events', () => {
     expect(state.nodes[0].badge).toBe('x');
   });
 
+  it('destaca o caminho final em verde apenas a partir do evento de resultado', () => {
+    const steps = numbered([...base, event('GRAPH_PATH', { path: [1, 2], color: 'green' })]);
+    expect(buildGraphState(steps, 2, true, false).edges[0].color).toBe('#64748b');
+    const state = buildGraphState(steps, 3, true, false);
+    expect(state.nodes.map((node) => node.color)).toEqual(['green', 'green']);
+    expect(state.edges[0].color).toBe('green');
+    expect(state.edges[0].highlighted).toBe(true);
+  });
+
   it('ignora estados desconhecidos e caminhos inválidos', () => {
     const steps = numbered([
       ...base,

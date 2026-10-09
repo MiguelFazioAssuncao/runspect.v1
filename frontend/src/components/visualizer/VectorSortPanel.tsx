@@ -22,7 +22,7 @@ const STATE_LABEL: Record<VectorElementState, string> = {
   found: 'encontrado',
 };
 
-function describeOperation(operation: VectorOperation | null): string {
+function describeOperation(operation: VectorOperation | null, vector: VectorSnapshot): string {
   if (!operation) return '';
   switch (operation.kind) {
     case 'compare':
@@ -32,14 +32,14 @@ function describeOperation(operation: VectorOperation | null): string {
     case 'probe':
       return `consulta: [${operation.index}]`;
     case 'set':
-      return `escrita: [${operation.index}] = ${operation.value}`;
+      return `escrita: [${operation.index}] = ${vector.items[operation.index]?.displayValue ?? operation.value}`;
   }
 }
 
 function VectorView({ vector }: { vector: VectorSnapshot }) {
   const compact = vector.items.length > COMPACT_THRESHOLD;
   const rendered = vector.items.slice(0, MAX_RENDERED_CELLS);
-  const operation = describeOperation(vector.operation);
+  const operation = describeOperation(vector.operation, vector);
 
   return (
     <div className="vector-view" data-testid={`vector-${vector.name}`}>
@@ -61,10 +61,10 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
             <div
               key={item.index}
               className={`vector-cell vector-cell-${item.state}`}
-              title={`${item.index}: ${item.value} (${STATE_LABEL[item.state]})`}
+              title={`${item.index}: ${item.displayValue ?? item.value} (${STATE_LABEL[item.state]})`}
             >
               <span className="vector-index">{item.index}</span>
-              <span className="vector-value">{compact ? '' : item.value}</span>
+              <span className="vector-value">{compact ? '' : (item.displayValue ?? item.value)}</span>
             </div>
           ))}
         </div>
@@ -81,7 +81,7 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
       )}
       {vector.result && (
         <p className="vector-result">
-          resultado: {vector.result.slice(0, MAX_RENDERED_CELLS).join(', ')}
+          resultado: {vector.result.slice(0, MAX_RENDERED_CELLS).map((value, index) => vector.items[index]?.displayValue ?? value).join(', ')}
           {vector.result.length > MAX_RENDERED_CELLS ? ' …' : ''}
         </p>
       )}
