@@ -124,7 +124,7 @@ class Instrumenter:
         spelling = typ.spelling
         standard = any(part in spelling for part in (
             "std::vector<", "std::basic_string<", "std::array<", "std::deque<",
-            "std::list<", "std::set<", "std::map<", "std::unordered_",
+            "std::list<", "std::set<", "std::multiset<", "std::map<", "std::multimap<", "std::unordered_",
             "std::queue<", "std::stack<", "std::priority_queue<", "std::pair<",
             "std::tuple<", "std::optional<", "std::bitset<",
         ))
@@ -151,6 +151,10 @@ class Instrumenter:
                 if child.is_definition():
                     self.functions.append(child)
             elif child.kind == self.K.VAR_DECL and globals_allowed and child.is_definition():
+                if child.semantic_parent and child.semantic_parent.kind in (self.K.CLASS_DECL,self.K.STRUCT_DECL):
+                    # An out-of-class static member definition still requires
+                    # its class qualifier outside member function bodies.
+                    continue
                 v = self.variable(child, initialized=True)
                 if v:
                     self.globals[v[0]] = v
@@ -226,7 +230,7 @@ class Instrumenter:
             method = "graph" if usr in self.graphs else "observe"
             sorting = ",true" if method == "observe" and usr in self.sorting_vectors else ""
             call = f"{frame}.{method}({json.dumps(display, ensure_ascii=True)},{name}{sorting});"
-            calls.append((f"if({ready})" if ready else "") + call)
+            calls.append((f"if({ready}) {{ {call} }} else {frame}.uninitialized({json.dumps(display)});" if ready else call))
         return "{ ::runspect_auto::Frame " + frame + "(" + json.dumps(caption) + "," + str(line) + ");" + "".join(calls) + "}"
 
     def refs_written(self, node):
@@ -312,11 +316,14 @@ class Instrumenter:
                 op = self.source[kids[0].extent.end.offset:kids[1].extent.start.offset].strip()
                 if op in (b"=", b"+=", b"-=", b"*=", b"/=", b"%=", b"&=", b"|=", b"^="):
                     self.reads(kids[1], scope)
+                    self.matrix_access(kids[0], scope, write=True)
                     return
         if kind == self.K.CALL_EXPR and node.spelling not in ("operator[]", "operator==", "operator!=", "operator<", "operator>"):
             # Calls can mutate reference arguments (swap, cin >>, custom funcs).
             return
         if kind in (self.K.ARRAY_SUBSCRIPT_EXPR, self.K.CALL_EXPR) and (kind != self.K.CALL_EXPR or node.spelling == "operator[]"):
+            if self.matrix_access(node,scope):
+                return
             text = self.text(node)
             match = re.fullmatch(r"([A-Za-z_]\w*)\s*\[([\s\S]+)\]", text)
             if match and match.group(1) in scope and "[" not in match.group(2):
@@ -331,6 +338,21 @@ class Instrumenter:
                     return
         for child in self.children(node):
             self.reads(child, scope)
+
+    def matrix_access(self, node, scope, write=False):
+        match = re.fullmatch(r"([A-Za-z_]\w*)\s*\[([^\[\]]+)\]\s*\[([^\[\]]+)\]",self.text(node))
+        if not match or match.group(1) not in scope or scope[match.group(1)][1] in self.graphs:
+            return False
+        typ = node.type.get_canonical()
+        if typ.kind in (self.ci.TypeKind.RECORD,self.ci.TypeKind.POINTER) and "bool" not in typ.spelling:
+            return False
+        name,row,col = match.groups()
+        display = self.aliases.get(scope[name][1],name)
+        # Calling a method on the row wrapper sequences row evaluation before
+        # column evaluation, just as the two original [] expressions do.
+        self.replace(node.extent.start.offset,node.extent.end.offset,
+            f"::runspect_auto::matrix_row({json.dumps(display)},{name},({row}),{node.location.line}).at(({col}),{'true' if write else 'false'})")
+        return True
 
     def search_condition(self, node):
         # Only a direct equality with one subscript is a value lookup. Do not
@@ -441,6 +463,7 @@ class Instrumenter:
                                     local[v[0]] = v
                         for body in self.children(sub):
                             if body.kind == K.COMPOUND_STMT and self.children(body):
+                                self.call_guard(body, "lambda", self.children(sub))
                                 self.block(body, local, entry=True)
                         break
                 v = self.variable(var)
@@ -454,6 +477,7 @@ class Instrumenter:
                         self.warnings.add("Escalares sem inicialização no escopo compartilhado de switch não são observados; use blocos por caso.")
                         continue
                     scope[v[0]] = v
+                    guards.append(f"::runspect_auto::local({json.dumps(self.aliases.get(v[1],v[0]))});")
                     if v[3]: guards.append(f"bool {v[3]}=false;")
             self.insert(self.end(node), "".join(guards) + self.frame(scope, node.location.line))
             return
@@ -566,6 +590,18 @@ class Instrumenter:
         self.reads(node, scope)
         self.insert(self.end(node), self.initialize_written(node, scope) + self.snapshot_write(node, scope) + self.frame(scope, node.location.line, defer_graph=defer_graph) + self.match_written(node, scope))
 
+    def call_guard(self, body, name, parameters):
+        self.serial += 1
+        guard = self.prefix + "call_" + str(self.serial)
+        locals = []
+        for param in parameters:
+            if param.kind != self.K.PARM_DECL:
+                continue
+            v = self.variable(param, initialized=True)
+            if v and param.type.kind not in (self.ci.TypeKind.LVALUEREFERENCE,self.ci.TypeKind.RVALUEREFERENCE):
+                locals.append(f"{guard}.local({json.dumps(v[0])});")
+        self.insert(body.extent.start.offset+1,f"::runspect_auto::Call {guard}({json.dumps(name)},{body.location.line});" + "".join(locals))
+
     def run(self):
         self.collect(self.unit.cursor)
         for function in self.functions:
@@ -588,6 +624,7 @@ class Instrumenter:
                 if body.kind == self.K.COMPOUND_STMT:
                     if function.spelling == "main":
                         self.insert(body.extent.start.offset + 1, "::runspect_auto::start(); ::runspect_auto::Completion " + self.prefix + "completion;")
+                    self.call_guard(body,function.spelling,function.get_arguments() or [])
                     self.block(body, scope, entry=True)
         # Multiple insertions at the same position must preserve discovery order.
         output = bytearray(self.source)

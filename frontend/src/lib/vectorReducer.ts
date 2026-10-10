@@ -223,19 +223,29 @@ export function createVectorReplay(steps: TraceStep[]) {
   let previous = -1;
   const vectors = new Map<string, WorkingVector>();
   const issues: VectorIssue[] = [];
+  let activeScope: Set<string> | null = null;
   return (eventIndex: number): VectorsState => {
-    if (eventIndex < previous) { vectors.clear(); issues.length = 0; previous = -1; }
+    if (eventIndex < previous) { vectors.clear(); issues.length = 0; previous = -1; activeScope = null; }
     const last = Math.min(eventIndex, steps.length - 1);
 
     for (let i = previous + 1; i <= last; i++) {
       const step = steps[i];
+      if (step.step_event === 'VARIABLE_END' && typeof step.data?.name === 'string') {
+        vectors.delete(step.data.name);
+        continue;
+      }
+      if (step.step_event === 'FRAME_SCOPE' && Array.isArray(step.data?.names)) {
+        activeScope = new Set(step.data.names.map(String));
+        continue;
+      }
       if (step.step_event === 'STEP') {
+        if (step.data?.line === 0 && step.data?.caption?.startsWith('Execução concluída')) activeScope = null;
         vectors.forEach((vector) => {
           vector.clearOnNext = true;
         });
         continue;
       }
-      if (!step.step_event.startsWith('VECTOR_')) continue;
+      if (!step.step_event.startsWith('VECTOR_') || step.step_event === 'VECTOR_META') continue;
       const reason = applyEvent(vectors, step);
       if (reason) issues.push({ event: i, step_event: step.step_event, reason });
     }
@@ -252,7 +262,7 @@ export function createVectorReplay(steps: TraceStep[]) {
     }));
 
     previous = last;
-    return { vectors: snapshots, issues: [...issues] };
+    return { vectors: snapshots.filter(vector => activeScope === null || activeScope.has(vector.name)), issues: [...issues] };
   };
 }
 

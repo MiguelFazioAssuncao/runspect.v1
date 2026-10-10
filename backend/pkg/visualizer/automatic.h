@@ -184,7 +184,9 @@ template<class T, size_t N> struct sequence<T[N]> : std::true_type {};
 template<class T, class A> struct sequence<std::deque<T,A>> : std::true_type {};
 template<class T, class A> struct sequence<std::list<T,A>> : std::true_type {};
 template<class C, class A, class Alloc> struct sequence<std::set<C,A,Alloc>> : std::true_type {};
+template<class C, class A, class Alloc> struct sequence<std::multiset<C,A,Alloc>> : std::true_type {};
 template<class C, class H, class E, class A> struct sequence<std::unordered_set<C,H,E,A>> : std::true_type {};
+template<class C, class H, class E, class A> struct sequence<std::unordered_multiset<C,H,E,A>> : std::true_type {};
 template<class C, class Traits, class A> struct sequence<std::basic_string<C,Traits,A>> : std::true_type {};
 template<class T> struct pair : std::false_type {};
 template<class A, class B> struct pair<std::pair<A,B>> : std::true_type {};
@@ -196,16 +198,62 @@ template<class T> struct bits : std::false_type {};
 template<size_t N> struct bits<std::bitset<N>> : std::true_type {};
 template<class T> struct mapping : std::false_type {};
 template<class K, class V, class C, class A> struct mapping<std::map<K,V,C,A>> : std::true_type {};
+template<class K, class V, class C, class A> struct mapping<std::multimap<K,V,C,A>> : std::true_type {};
 template<class K, class V, class H, class E, class A> struct mapping<std::unordered_map<K,V,H,E,A>> : std::true_type {};
+template<class K, class V, class H, class E, class A> struct mapping<std::unordered_multimap<K,V,H,E,A>> : std::true_type {};
 template<class T> struct adapter : std::false_type {};
 template<class T, class C> struct adapter<std::queue<T,C>> : std::true_type {};
 template<class T, class C> struct adapter<std::stack<T,C>> : std::true_type {};
 template<class T, class C, class P> struct adapter<std::priority_queue<T,C,P>> : std::true_type {};
 template<class T> struct priority : std::false_type {};
 template<class T, class C, class P> struct priority<std::priority_queue<T,C,P>> : std::true_type {};
+template<class T> struct safe_priority : std::false_type {};
+template<class T,class C,class P> struct safe_priority<std::priority_queue<T,C,P>> : std::bool_constant<std::is_same_v<P,std::less<T>> || std::is_same_v<P,std::greater<T>>> {};
+template<class T> struct safe_adapter_container : std::false_type {};
+template<class T,class C> struct safe_adapter_container<std::queue<T,C>> : std::bool_constant<std::is_same_v<C,std::deque<T>> || std::is_same_v<C,std::list<T>>> {};
+template<class T,class C> struct safe_adapter_container<std::stack<T,C>> : std::bool_constant<std::is_same_v<C,std::deque<T>> || std::is_same_v<C,std::list<T>> || std::is_same_v<C,std::vector<T>>> {};
+template<class T,class C,class P> struct safe_adapter_container<std::priority_queue<T,C,P>> : std::bool_constant<std::is_same_v<C,std::vector<T>> || std::is_same_v<C,std::deque<T>>> {};
 template<class T> using bare = std::remove_cv_t<std::remove_reference_t<T>>;
+template<class T> constexpr bool number = std::is_arithmetic_v<bare<T>> || std::is_same_v<bare<T>, __int128> || std::is_same_v<bare<T>, unsigned __int128>;
+template<class T> struct safe_item : std::bool_constant<number<T> || std::is_enum_v<T> || std::is_same_v<T,std::string>> {};
+template<class A,class B> struct safe_item<std::pair<A,B>> : std::bool_constant<safe_item<bare<A>>::value && safe_item<bare<B>>::value> {};
+
+template<class T> struct structure_kind { static std::string name() { return "scalar"; } };
+template<class T,class A> struct structure_kind<std::vector<T,A>> { static std::string name() { return pair<bare<T>>::value ? "vector-pair" : "vector"; } };
+template<class T,size_t N> struct structure_kind<std::array<T,N>> { static std::string name() { return "array"; } };
+template<class T,size_t N> struct structure_kind<T[N]> { static std::string name() { return "array"; } };
+template<class T,class A> struct structure_kind<std::deque<T,A>> { static std::string name() { return "deque"; } };
+template<class T,class A> struct structure_kind<std::list<T,A>> { static std::string name() { return "list"; } };
+template<class T,class C,class A> struct structure_kind<std::set<T,C,A>> { static std::string name() { return "set"; } };
+template<class T,class C,class A> struct structure_kind<std::multiset<T,C,A>> { static std::string name() { return "multiset"; } };
+template<class T,class H,class E,class A> struct structure_kind<std::unordered_set<T,H,E,A>> { static std::string name() { return "unordered_set"; } };
+template<class T,class H,class E,class A> struct structure_kind<std::unordered_multiset<T,H,E,A>> { static std::string name() { return "unordered_multiset"; } };
+template<class K,class V,class C,class A> struct structure_kind<std::map<K,V,C,A>> { static std::string name() { return "map"; } };
+template<class K,class V,class C,class A> struct structure_kind<std::multimap<K,V,C,A>> { static std::string name() { return "multimap"; } };
+template<class K,class V,class H,class E,class A> struct structure_kind<std::unordered_map<K,V,H,E,A>> { static std::string name() { return "unordered_map"; } };
+template<class K,class V,class H,class E,class A> struct structure_kind<std::unordered_multimap<K,V,H,E,A>> { static std::string name() { return "unordered_multimap"; } };
+template<class T,class C> struct structure_kind<std::queue<T,C>> { static std::string name() { return "queue"; } };
+template<class T,class C> struct structure_kind<std::stack<T,C>> { static std::string name() { return "stack"; } };
+template<class T,class C,class P> struct structure_kind<std::priority_queue<T,C,P>> { static std::string name() { return "priority_queue"; } };
+template<class C,class T,class A> struct structure_kind<std::basic_string<C,T,A>> { static std::string name() { return "string"; } };
+template<class A,class B> struct structure_kind<std::pair<A,B>> { static std::string name() { return "pair"; } };
+template<class... T> struct structure_kind<std::tuple<T...>> { static std::string name() { return "tuple"; } };
+template<class T> struct structure_kind<std::optional<T>> { static std::string name() { return "optional"; } };
+template<size_t N> struct structure_kind<std::bitset<N>> { static std::string name() { return "bitset"; } };
+
+inline std::string int128_text(unsigned __int128 value) {
+    std::string out;
+    do { out.push_back(static_cast<char>('0' + value % 10)); value /= 10; } while (value);
+    std::reverse(out.begin(), out.end());
+    return out;
+}
 
 template<class T> inline std::string text(const T& value);
+
+template<class Member,class T> inline std::string pair_item(const T& value) {
+    if constexpr (std::is_reference_v<Member>) return "referência não expandida";
+    else return text(value);
+}
 
 template<size_t I, class T> inline std::string tuple_item(const T& value) {
     if constexpr (std::is_reference_v<std::tuple_element_t<I, bare<T>>>) {
@@ -223,6 +271,13 @@ template<class T, size_t... I> inline std::vector<std::string> tuple_items(const
 template<class T> inline std::string text(const T& value) {
     if constexpr (std::is_volatile_v<T>) {
         return "valor volatile não expandido";
+    } else if constexpr (std::is_same_v<bare<T>, __int128>) {
+        // Unsigned subtraction also handles the minimum signed 128-bit value.
+        auto magnitude = static_cast<unsigned __int128>(value);
+        if (value < 0) magnitude = 0 - magnitude;
+        return (value < 0 ? "-" : "") + int128_text(magnitude);
+    } else if constexpr (std::is_same_v<bare<T>, unsigned __int128>) {
+        return int128_text(value);
     } else if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
         std::ostringstream out;
         out.imbue(std::locale::classic());
@@ -233,7 +288,7 @@ template<class T> inline std::string text(const T& value) {
     } else if constexpr (std::is_same_v<bare<T>, std::string>) {
         return value.substr(0, max_items);
     } else if constexpr (pair<T>::value) {
-        return "(" + text(value.first) + ", " + text(value.second) + ")";
+        return "(" + pair_item<typename bare<T>::first_type>(value.first) + ", " + pair_item<typename bare<T>::second_type>(value.second) + ")";
     } else if constexpr (tuple<bare<T>>::value) {
         constexpr size_t count = std::tuple_size_v<bare<T>>;
         if constexpr (count > max_items) items_limit();
@@ -259,16 +314,71 @@ template<class T> inline std::string text(const T& value) {
 
 inline std::map<std::string,std::vector<long double>> vectors;
 inline std::map<std::string,std::vector<std::string>> vector_labels;
+inline std::map<std::string,std::vector<long double>> completed_vectors;
+inline std::map<std::string,std::vector<std::string>> completed_vector_labels;
+inline std::set<std::string> completed_sorting_vectors;
+inline std::map<std::string,std::set<int>> completed_found_indices;
+inline std::set<std::string> completed_truncated_vectors;
+inline std::map<std::string,std::string> completed_metadata;
+inline std::map<std::string,std::vector<std::string>> completed_structures;
+inline std::map<std::string,std::string> completed_structure_kinds;
+inline std::map<std::string,size_t> completed_structure_sizes;
+inline std::map<std::string,bool> completed_structure_opaque;
+inline std::map<std::string,std::vector<std::vector<std::string>>> completed_matrices;
+inline std::map<std::string,size_t> completed_matrix_sizes;
+inline std::map<std::string,std::pair<size_t,size_t>> completed_matrix_shapes;
 inline std::map<std::string,std::set<int>> found_indices;
 inline std::set<std::string> sorting_vectors;
 inline std::set<std::string> truncated_vectors;
 inline std::set<long double> infinity_values;
 inline std::map<std::string,std::string> structure_cache;
+inline std::map<std::string,std::string> metadata_cache;
+inline std::map<std::string,std::vector<std::string>> structure_items;
+inline std::map<std::string,std::string> structure_kinds;
+inline std::map<std::string,size_t> structure_sizes;
+inline std::map<std::string,bool> structure_opaque;
 inline std::vector<std::string> last_scalars;
 inline std::map<std::string,std::vector<std::vector<std::string>>> matrix_cache;
 inline int read_line = -1;
 struct Access { std::string name; int index; std::string value; };
 inline std::vector<Access> accesses;
+struct MatrixAccess { std::string name; size_t row; size_t col; };
+inline std::vector<MatrixAccess> matrix_reads;
+
+template<class C,class R> class MatrixRow {
+    const char* name;
+    C& container;
+    R row;
+    int line;
+public:
+    MatrixRow(const char* name, C& container, R row, int line) : name(name),container(container),row(row),line(line) {
+        if (program_started && (row < 0 || static_cast<size_t>(row) >= std::size(container)))
+            fail_execution("RUNTIME_ERROR","Índice de linha fora dos limites na linha " + std::to_string(line) + ": " + name + "[" + std::to_string(row) + "].",line);
+    }
+    template<class I> decltype(auto) at(I col, bool write = false) {
+        if (program_started && (col < 0 || static_cast<size_t>(col) >= std::size(container[row])))
+            fail_execution("RUNTIME_ERROR","Índice de coluna fora dos limites na linha " + std::to_string(line) + ": " + name + "[" + std::to_string(row) + "][" + std::to_string(col) + "].",line);
+        if (enabled()) {
+            std::string fields = ",\"row\":" + std::to_string(row) + ",\"col\":" + std::to_string(col)
+                + ",\"access\":\"" + (write ? "write" : "read") + "\",\"dependencies\":[";
+            if (write) {
+                for (size_t i=0;i<matrix_reads.size();++i) {
+                    if (i) fields += ',';
+                    const auto& dep = matrix_reads[i];
+                    fields += "{\"name\":\"" + viz::escape_json(dep.name) + "\",\"row\":" + std::to_string(dep.row) + ",\"col\":" + std::to_string(dep.col) + "}";
+                }
+            } else if (matrix_reads.size() < max_items) {
+                matrix_reads.push_back({name,static_cast<size_t>(row),static_cast<size_t>(col)});
+            }
+            viz::emit_named("MATRIX_ACCESS",name,fields + "]",line);
+        }
+        return container[row][col];
+    }
+};
+
+template<class C,class R> auto matrix_row(const char* name, C& container, R row, int line) {
+    return MatrixRow<C,R>(name,container,row,line);
+}
 
 inline bool distance_name(const std::string& name) {
     return name == "dist" || name == "distance" || name == "distancia";
@@ -284,6 +394,29 @@ template<class T> inline std::string distance_label(const std::string& name, con
 
 inline std::string label_json(const std::string& label) {
     return label.empty() ? "null" : "\"" + viz::escape_json(label) + "\"";
+}
+
+inline std::string metadata(const std::string& kind, size_t size, size_t shown, bool initialized = true) {
+    return ",\"kind\":\"" + viz::escape_json(kind) + "\",\"size\":" + std::to_string(size)
+        + ",\"initialized\":" + (initialized ? "true" : "false")
+        + ",\"truncated\":" + std::to_string(size > shown ? size - shown : 0);
+}
+
+inline void vector_metadata(const std::string& name, const std::string& kind, size_t size, bool initialized = true, int line = 0) {
+    auto fields = metadata(kind, size, std::min(size,max_items), initialized);
+    if (metadata_cache[name] == fields) return;
+    metadata_cache[name] = fields;
+    viz::emit_named("VECTOR_META", name, fields, line);
+}
+
+template<class T> inline std::string exact_label(const std::string& name, const T& value) {
+    auto label = distance_label(name,value);
+    if (!label.empty()) return label;
+    if constexpr (number<T>) {
+        auto magnitude = static_cast<long double>(value);
+        if (magnitude > 9007199254740991.0L || magnitude < -9007199254740991.0L) return text(value);
+    }
+    return "";
 }
 
 inline std::string labels_json(const std::vector<std::string>& labels) {
@@ -314,15 +447,15 @@ inline void reset_vector(const std::string& name, int line) {
 
 inline void vector_snapshot(const std::string& name, const std::vector<long double>& current, int line, const std::vector<std::string>& labels = {}) {
     auto previous = vectors.find(name);
-    const bool labeled = distance_name(name) && labels.size() == current.size();
+    const bool labeled = labels.size() == current.size();
     auto label_fields = labeled ? labels_json(labels) : "";
     if (previous == vectors.end() || previous->second.size() != current.size()) {
         found_indices.erase(name);
         viz::emit_named("VECTOR_INIT", name, values_json(current) + label_fields, line);
-    } else if (previous->second != current) {
+    } else if (previous->second != current || (labeled && vector_labels[name] != labels)) {
         std::vector<size_t> changed;
         for (size_t i = 0; i < current.size(); ++i)
-            if (current[i] != previous->second[i]) changed.push_back(i);
+            if (current[i] != previous->second[i] || (labeled && (i >= vector_labels[name].size() || vector_labels[name][i] != labels[i]))) changed.push_back(i);
         for (auto i : changed) found_indices[name].erase(static_cast<int>(i));
         reset_vector(name, line);
         if (changed.size() == 2 && current[changed[0]] == previous->second[changed[1]] && current[changed[1]] == previous->second[changed[0]]) {
@@ -344,15 +477,182 @@ inline void vector_snapshot(const std::string& name, const std::vector<long doub
     vectors[name] = current;
 }
 
-inline void show_structure(const std::string& name, const std::vector<std::string>& items, int line) {
-    std::string key;
+inline void show_structure(const std::string& name, const std::vector<std::string>& items, int line, const std::string& kind = "structure", size_t size = std::numeric_limits<size_t>::max(), bool opaque = false) {
+    if (size == std::numeric_limits<size_t>::max()) size = items.size();
+    auto fields_meta = metadata(kind,size,opaque ? (size ? 1 : 0) : items.size()) + (opaque ? ",\"opaque\":true" : "");
+    std::string key = fields_meta;
     for (const auto& item : items) key += std::to_string(item.size()) + ":" + item;
     auto previous = structure_cache.find(name);
     if (previous == structure_cache.end() || previous->second != key) {
-        viz::show(name, items, line);
+        std::string fields = ",\"items\":[";
+        for (size_t i=0;i<items.size();++i) {
+            if (i) fields += ',';
+            fields += "\"" + viz::escape_json(items[i]) + "\"";
+        }
+        viz::emit_named("SET_STRUCT", name, fields + "]" + fields_meta,line);
         structure_cache[name] = key;
+        structure_items[name] = items;
+        structure_kinds[name] = kind;
+        structure_sizes[name] = size;
+        structure_opaque[name] = opaque;
     }
 }
+
+inline std::map<std::string,size_t> matrix_sizes;
+inline std::map<std::string,std::pair<size_t,size_t>> matrix_shapes;
+inline void show_matrix(const std::string& name, const std::vector<std::vector<std::string>>& rows, int line, size_t size, size_t row_count, size_t col_count) {
+    size_t shown = 0;
+    std::string fields = ",\"rows\":[";
+    for (size_t r=0;r<rows.size();++r) {
+        if (r) fields += ',';
+        fields += '[';
+        for (size_t c=0;c<rows[r].size();++c) {
+            if (c) fields += ',';
+            fields += "\"" + viz::escape_json(rows[r][c]) + "\"";
+            ++shown;
+        }
+        fields += ']';
+    }
+    auto kind = name == "dp" || name.rfind("dp_",0) == 0 ? "dp" : "matrix";
+    viz::emit_named("SET_MATRIX",name,fields + "]" + metadata(kind,size,shown)
+        + ",\"shape\":{\"rows\":" + std::to_string(row_count) + ",\"cols\":" + std::to_string(col_count) + "}",line);
+    matrix_cache[name] = rows;
+    matrix_sizes[name] = size;
+    matrix_shapes[name] = {row_count,col_count};
+}
+
+class Call;
+inline std::vector<Call*> call_stack;
+inline size_t next_call_id = 0;
+inline size_t total_calls = 0;
+inline size_t maximum_depth = 0;
+inline std::map<int,size_t> line_operations;
+
+// A call owns only its arguments and local variable names. Globals are never
+// restored, so changes made by a callee remain visible to its caller.
+class Call {
+    struct Saved {
+        std::optional<std::vector<long double>> vector;
+        std::vector<std::string> labels;
+        std::string meta;
+        std::optional<std::vector<std::string>> items;
+        std::string kind;
+        size_t size = 0;
+        bool opaque = false;
+        std::optional<std::vector<std::vector<std::string>>> matrix;
+        size_t matrix_size = 0;
+        std::pair<size_t,size_t> shape;
+        bool sorting = false;
+        bool truncated = false;
+        std::set<int> found;
+    };
+    std::map<std::string,Saved> saved;
+    std::vector<std::string> caller_scalars;
+    std::string function;
+    int line;
+    size_t parent;
+    bool active;
+public:
+    size_t id;
+    size_t depth;
+    Call(const char* name, int line) : caller_scalars(last_scalars), function(name), line(line),
+        parent(call_stack.empty() ? 0 : call_stack.back()->id), active(enabled()),
+        id(++next_call_id), depth(call_stack.size()+1) {
+        call_stack.push_back(this);
+        ++total_calls;
+        maximum_depth = std::max(maximum_depth,depth);
+        if (active) emit("CALL_ENTER");
+    }
+    void emit(const char* event) const {
+        viz::event_stream() << "{\"step_event\":\"" << event << "\",\"id\":" << id
+            << ",\"parent\":" << (parent ? std::to_string(parent) : "null")
+            << ",\"function\":\"" << viz::escape_json(function) << "\",\"depth\":" << depth
+            << ",\"line\":" << line << "}\n";
+    }
+    void at(int current_line) { line = current_line; }
+    void local(const char* name) {
+        if (!active || saved.count(name)) return;
+        Saved old;
+        if (vectors.count(name)) old.vector = vectors[name];
+        old.sorting = sorting_vectors.count(name);
+        old.truncated = truncated_vectors.count(name);
+        old.found = found_indices[name];
+        if (vector_labels.count(name)) old.labels = vector_labels[name];
+        if (metadata_cache.count(name)) old.meta = metadata_cache[name];
+        if (structure_items.count(name)) {
+            old.items = structure_items[name]; old.kind = structure_kinds[name]; old.size = structure_sizes[name];
+            old.opaque = structure_opaque[name];
+        }
+        if (matrix_cache.count(name)) {
+            old.matrix = matrix_cache[name]; old.matrix_size = matrix_sizes[name]; old.shape = matrix_shapes[name];
+        }
+        saved.emplace(name,std::move(old));
+        // The new binding starts its own snapshot history. Without clearing
+        // this cache a shadowed vector would emit SET against a caller's INIT.
+        vectors.erase(name); vector_labels.erase(name); metadata_cache.erase(name);
+        structure_cache.erase(name); structure_items.erase(name); structure_kinds.erase(name); structure_sizes.erase(name); structure_opaque.erase(name);
+        matrix_cache.erase(name); matrix_sizes.erase(name); matrix_shapes.erase(name);
+        found_indices.erase(name); truncated_vectors.erase(name); sorting_vectors.erase(name);
+    }
+    ~Call() {
+        if (!call_stack.empty()) call_stack.pop_back();
+        if (!active || !enabled()) return;
+        for (const auto& entry : saved) {
+            if (!parent) break; // Completion still shows main's final values.
+            const auto& name = entry.first; const auto& old = entry.second;
+            if (!old.vector && vectors.count(name)) {
+                completed_vectors[name] = vectors[name];
+                completed_vector_labels[name] = vector_labels[name];
+                completed_found_indices[name] = found_indices[name];
+                completed_metadata[name] = metadata_cache[name];
+                if (sorting_vectors.count(name) && !truncated_vectors.count(name)) completed_sorting_vectors.insert(name);
+                if (truncated_vectors.count(name)) completed_truncated_vectors.insert(name);
+            }
+            if (!old.items && structure_items.count(name)) {
+                completed_structures[name] = structure_items[name];
+                completed_structure_kinds[name] = structure_kinds[name];
+                completed_structure_sizes[name] = structure_sizes[name];
+                completed_structure_opaque[name] = structure_opaque[name];
+            }
+            if (!old.matrix && matrix_cache.count(name)) {
+                completed_matrices[name] = matrix_cache[name];
+                completed_matrix_sizes[name] = matrix_sizes[name];
+                completed_matrix_shapes[name] = matrix_shapes[name];
+            }
+            vectors.erase(name); vector_labels.erase(name); metadata_cache.erase(name);
+            structure_cache.erase(name); structure_items.erase(name); structure_kinds.erase(name); structure_sizes.erase(name); structure_opaque.erase(name);
+            matrix_cache.erase(name); matrix_sizes.erase(name); matrix_shapes.erase(name);
+            found_indices.erase(name); truncated_vectors.erase(name); sorting_vectors.erase(name);
+            if (old.vector) {
+                vector_snapshot(name,*old.vector,line,old.labels);
+                if (old.sorting) sorting_vectors.insert(name);
+                if (old.truncated) truncated_vectors.insert(name);
+                found_indices[name] = old.found;
+                for (int index : old.found) viz::vector_mark(name,index,viz::VectorState::Found,line);
+                if (!old.meta.empty()) { metadata_cache[name] = old.meta; viz::emit_named("VECTOR_META",name,old.meta,line); }
+            }
+            if (old.items) show_structure(name,*old.items,line,old.kind,old.size,old.opaque);
+            if (old.matrix) show_matrix(name,*old.matrix,line,old.matrix_size,old.shape.first,old.shape.second);
+            if (!old.vector && !old.items && !old.matrix) viz::emit_named("VARIABLE_END",name,"",line);
+        }
+        if (parent && !caller_scalars.empty()) {
+            // Keep observed global writes while restoring shadowed parameters
+            // and locals from the caller. No program expression is evaluated.
+            for (auto& item : caller_scalars) {
+                auto separator = item.find(" = ");
+                if (separator == std::string::npos || saved.count(item.substr(0,separator))) continue;
+                auto prefix = item.substr(0,separator+3);
+                for (const auto& latest : last_scalars) if (latest.rfind(prefix,0)==0) { item = latest; break; }
+            }
+            show_structure("Variáveis",caller_scalars,line,"scalars");
+        }
+        emit("CALL_EXIT");
+        viz::step("Retorno de " + function,line);
+        ++frame_count;
+    }
+};
+
+inline void local(const char* name) { if (!call_stack.empty()) call_stack.back()->local(name); }
 
 using Edges = std::map<std::pair<int,int>,int>;
 inline std::string active_graph;
@@ -427,31 +727,53 @@ inline void graph_snapshot(const std::string& name, std::set<int> nodes, Edges e
 
 class Frame {
     std::vector<std::string> scalars;
+    std::vector<std::string> names;
     std::string caption;
     int line;
     bool active;
 public:
-    Frame(const char* caption, int line) : caption(caption), line(line), active(enabled()) { flush_output(line); }
+    Frame(const char* caption, int line) : caption(caption), line(line), active(enabled()) {
+        flush_output(line);
+        if (!call_stack.empty()) call_stack.back()->at(line);
+    }
     ~Frame() {
         if (!active) return;
         if (!scalars.empty()) last_scalars = scalars;
-        show_structure("Variáveis", scalars, line);
+        show_structure("Variáveis", scalars, line,"scalars");
+        std::string scope = ",\"names\":[";
+        for (size_t i=0;i<names.size();++i) { if(i) scope += ','; scope += "\"" + viz::escape_json(names[i]) + "\""; }
+        viz::emit_named("FRAME_SCOPE","",scope + "]",line);
         show_structure("Execução", {"linha " + std::to_string(line)}, line);
         viz::step(caption, line);
         ++frame_count;
         read_line = -1;
         accesses.clear();
+        matrix_reads.clear();
+    }
+    void uninitialized(const std::string& name) {
+        if (!active) return;
+        names.push_back(name);
+        if (metadata_cache[name] == "uninitialized") return;
+        metadata_cache[name] = "uninitialized";
+        viz::emit_named("UNINITIALIZED",name,",\"kind\":\"scalar\",\"initialized\":false",line);
     }
     template<class T> void observe(const std::string& name, const T& value, bool sorting = false) {
         if (!active) return;
-        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
+        names.push_back(name);
+        if (metadata_cache[name] == "uninitialized") {
+            metadata_cache.erase(name);
+            viz::emit_named("UNINITIALIZED",name,",\"kind\":\"scalar\",\"initialized\":true",line);
+        }
+        const auto kind = structure_kind<bare<T>>::name();
+        if constexpr (number<T> || std::is_enum_v<T>) {
             scalars.push_back(name + " = " + text(value));
-            if constexpr (std::is_arithmetic_v<T>) {
+            if constexpr (number<T>) {
                 if (name == "INF" || name == "inf" || name == "infinity") infinity_values.insert(static_cast<long double>(value));
             }
         } else if constexpr (sequence<bare<T>>::value) {
             using Item = bare<decltype(*std::begin(value))>;
-            if constexpr (std::is_arithmetic_v<Item>) {
+            if constexpr (number<Item>) {
+                vector_metadata(name,kind,std::size(value),true,line);
                 if (std::size(value) > max_items) truncated_vectors.insert(name);
                 else truncated_vectors.erase(name);
                 std::vector<long double> current;
@@ -461,7 +783,7 @@ public:
                     long double n = static_cast<long double>(item);
                     if (!std::isfinite(n)) return;
                     current.push_back(n);
-                    if (distance_name(name)) labels.push_back(distance_label(name, static_cast<Item>(item)));
+                    labels.push_back(exact_label(name, static_cast<Item>(item)));
                 }
                 vector_snapshot(name, current, line, labels);
                 if (sorting) sorting_vectors.insert(name);
@@ -502,7 +824,7 @@ public:
                 }
             } else if constexpr (sequence<Item>::value) {
                 using Cell = bare<decltype(*std::begin(*std::begin(value)))>;
-                if constexpr (std::is_arithmetic_v<Cell>) {
+                if constexpr (number<Cell>) {
                     std::vector<std::vector<std::string>> rows;
                     size_t count = 0;
                     for (const auto& row : value) {
@@ -514,10 +836,11 @@ public:
                         }
                         rows.push_back(std::move(cells));
                     }
+                    size_t total = 0, cols = 0;
+                    for (const auto& row : value) { total += std::size(row); cols = std::max(cols,std::size(row)); }
                     auto old = matrix_cache.find(name);
-                    if (old == matrix_cache.end() || old->second != rows) {
-                        viz::show_matrix(name, rows, line);
-                        matrix_cache[name] = std::move(rows);
+                    if (old == matrix_cache.end() || old->second != rows || matrix_sizes[name] != total) {
+                        show_matrix(name, rows, line, total, std::size(value), cols);
                     }
                 }
             } else if constexpr (pair<Item>::value || tuple<Item>::value || optional<Item>::value || bits<Item>::value || std::is_same_v<Item,std::string>) {
@@ -526,9 +849,11 @@ public:
                     if (items.size() == max_items) { items_limit(); break; }
                     items.push_back(text(item));
                 }
-                show_structure(name,items,line);
+                if (kind.rfind("unordered_",0) == 0) std::sort(items.begin(),items.end());
+                show_structure(name,items,line,kind,std::size(value));
             }
         } else if constexpr (bits<bare<T>>::value) {
+            vector_metadata(name,kind,value.size(),true,line);
             std::vector<long double> current;
             if (value.size() > max_items) items_limit();
             for (size_t i = 0; i < std::min(value.size(), max_items); ++i) current.push_back(value[i] ? 1 : 0);
@@ -536,48 +861,51 @@ public:
         } else if constexpr (tuple<bare<T>>::value) {
             constexpr size_t count = std::tuple_size_v<bare<T>>;
             if constexpr (count > max_items) items_limit();
-            show_structure(name, tuple_items(value, std::make_index_sequence<std::min(count, max_items)>{}), line);
+            show_structure(name, tuple_items(value, std::make_index_sequence<std::min(count, max_items)>{}), line,kind,count);
         } else if constexpr (optional<bare<T>>::value) {
-            show_structure(name, {text(value)}, line);
+            show_structure(name, {text(value)}, line,kind);
         } else if constexpr (mapping<bare<T>>::value) {
             std::vector<std::string> items;
             for (const auto& item : value) {
                 if (items.size() == max_items) { items_limit(); break; }
                 items.push_back(text(item.first) + " → " + text(item.second));
             }
-            show_structure(name,items,line);
+            if (kind.rfind("unordered_",0) == 0) std::sort(items.begin(),items.end());
+            show_structure(name,items,line,kind,value.size());
         } else if constexpr (adapter<bare<T>>::value) {
-            if constexpr (std::is_arithmetic_v<typename T::value_type>) {
+            if constexpr (safe_item<typename T::value_type>::value) {
                 // Popping a copied heap would invoke a user-defined comparator.
-                if constexpr (priority<T>::value) {
+                if constexpr ((priority<T>::value && !safe_priority<T>::value) || !safe_adapter_container<T>::value) {
                     std::vector<std::string> items;
-                    if (!value.empty()) items.push_back("topo = " + text(value.top()));
+                    if (!value.empty()) {
+                        if constexpr (std::is_same_v<T,std::queue<typename T::value_type,typename T::container_type>>) items.push_back("frente = " + text(value.front()));
+                        else items.push_back("topo = " + text(value.top()));
+                    }
                     items.push_back("tamanho = " + std::to_string(value.size()));
-                    show_structure(name,items,line);
+                    show_structure(name,items,line,kind,value.size(),true);
                     return;
+                } else {
+                    if (value.size() > max_items) items_limit();
+                    auto copy = value;
+                    std::vector<std::string> items;
+                    while (!copy.empty() && items.size() < max_items) {
+                        if constexpr (std::is_same_v<T,std::queue<typename T::value_type,typename T::container_type>>) items.push_back(text(copy.front()));
+                        else items.push_back(text(copy.top()));
+                        copy.pop();
+                    }
+                    if (!copy.empty()) items_limit();
+                    show_structure(name,items,line,kind,value.size());
                 }
-                if (value.size() > max_items) {
-                    items_limit();
-                    show_structure(name,{"estrutura grande: " + std::to_string(value.size()) + " elementos"},line);
-                    return;
-                }
-                auto copy = value;
-                std::vector<std::string> items;
-                while (!copy.empty() && items.size() < max_items) {
-                    if constexpr (std::is_same_v<T,std::queue<typename T::value_type,typename T::container_type>>) items.push_back(text(copy.front()));
-                    else items.push_back(text(copy.top()));
-                    copy.pop();
-                }
-                if (!copy.empty()) items_limit();
-                show_structure(name,items,line);
             }
         } else if constexpr (pair<T>::value) {
             scalars.push_back(name + " = " + text(value));
+            show_structure(name,{"first = " + pair_item<typename bare<T>::first_type>(value.first),"second = " + pair_item<typename bare<T>::second_type>(value.second)},line,kind,2);
         }
     }
 
     template<class T> void graph(const std::string& name, const T& value, bool edge_list = false) {
         if (!active) return;
+        names.push_back(name);
         if constexpr (sequence<bare<T>>::value) {
             using Row = bare<decltype(*std::begin(value))>;
             std::set<int> nodes;
@@ -678,6 +1006,7 @@ inline bool condition(bool value, int line, bool search = false) {
         viz::step(caption,line);
         ++frame_count;
         read_line = -1;
+        matrix_reads.clear();
     }
     return value;
 }
@@ -685,15 +1014,15 @@ inline bool condition(bool value, int line, bool search = false) {
 template<class C,class I> void written(const char* name, const C& container, I index, int line) {
     if (!enabled() || index < 0 || !vectors.count(name) || static_cast<size_t>(index) >= vectors[name].size()) return;
     using Item = bare<decltype(container[index])>;
-    if constexpr (std::is_arithmetic_v<Item>) {
+    if constexpr (number<Item>) {
         long double value = static_cast<long double>(container[index]);
         if (!std::isfinite(value)) return;
-        auto label = distance_label(name, container[index]);
+        auto label = exact_label(name, container[index]);
         std::string caption = std::string("Atualiza ") + name + "[" + std::to_string(index) + "] = " + (label.empty() ? text(container[index]) : label);
         std::ostringstream fields;
         fields.imbue(std::locale::classic());
         fields << ",\"index\":" << index << ",\"value\":" << std::setprecision(17) << static_cast<double>(value);
-        if (distance_name(name)) fields << ",\"value_label\":" << label_json(label);
+        fields << ",\"value_label\":" << label_json(label);
         found_indices[name].erase(static_cast<int>(index));
         reset_vector(name,line);
         viz::emit_named("VECTOR_SET",name,fields.str()+viz::caption_field(caption),line);
@@ -724,6 +1053,25 @@ inline void match(const char* text_name, const char* pattern_name, int position,
 inline void finish() {
     flush_output(0);
     if (!enabled()) return;
+    for (const auto& entry : completed_vectors) if (!vectors.count(entry.first)) {
+        vectors[entry.first] = entry.second;
+        vector_labels[entry.first] = completed_vector_labels[entry.first];
+        found_indices[entry.first] = completed_found_indices[entry.first];
+        if (completed_sorting_vectors.count(entry.first)) sorting_vectors.insert(entry.first);
+        if (completed_truncated_vectors.count(entry.first)) truncated_vectors.insert(entry.first);
+        // Recreate an authoritative final snapshot after VARIABLE_END and the
+        // caller's FRAME_SCOPE removed the callee's local display.
+        auto labels = vector_labels[entry.first];
+        viz::emit_named("VECTOR_INIT",entry.first,values_json(entry.second) + (labels.size()==entry.second.size() ? labels_json(labels) : ""),0);
+        auto meta = completed_metadata[entry.first];
+        if (!meta.empty()) { metadata_cache[entry.first] = meta; viz::emit_named("VECTOR_META",entry.first,meta,0); }
+    }
+    for (const auto& entry : completed_structures) if (!structure_items.count(entry.first))
+        show_structure(entry.first,entry.second,0,completed_structure_kinds[entry.first],completed_structure_sizes[entry.first],completed_structure_opaque[entry.first]);
+    for (const auto& entry : completed_matrices) if (!matrix_cache.count(entry.first)) {
+        const auto& shape = completed_matrix_shapes[entry.first];
+        show_matrix(entry.first,entry.second,0,completed_matrix_sizes[entry.first],shape.first,shape.second);
+    }
     for (const auto& entry : vectors) {
         reset_vector(entry.first, 0);
         const auto& values = entry.second;
@@ -731,7 +1079,7 @@ inline void finish() {
             (std::is_sorted(values.begin(), values.end()) || std::is_sorted(values.rbegin(), values.rend()))) {
             for (size_t i = 0; i < values.size(); ++i) viz::vector_mark(entry.first, static_cast<int>(i), viz::VectorState::Sorted, 0);
         }
-        auto label_fields = vector_labels.count(entry.first) ? labels_json(vector_labels[entry.first]) : "";
+        auto label_fields = vector_labels.count(entry.first) && vector_labels[entry.first].size()==values.size() ? labels_json(vector_labels[entry.first]) : "";
         viz::emit_named("VECTOR_RESULT", entry.first, values_json(values) + label_fields + viz::caption_field("Execução concluída"), 0);
     }
     for (int id : processed_nodes) if (graph_nodes.count(id)) viz::graph_node_state(id, viz::NodeState::Done, 0);

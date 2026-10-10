@@ -1,6 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+import { ResizablePanel } from '@/components/workspace/ResizablePanel';
+import { StructureView } from './StructureViews';
+import { CHANGE_LABELS, inferStructureView, STRUCTURE_VIEWS } from '@/lib/structureViews';
+import type { StructureView as StructureViewKind } from '@/lib/structureViews';
 import type {
   VectorElementState,
   VectorIssue,
@@ -37,14 +41,23 @@ function describeOperation(operation: VectorOperation | null, vector: VectorSnap
 }
 
 function VectorView({ vector }: { vector: VectorSnapshot }) {
+  const [choice, setChoice] = useState<'auto' | 'cells' | StructureViewKind>('auto');
+  const inferred = inferStructureView({ kind: vector.kind });
+  const view = choice === 'auto' ? (['set', 'deque', 'stack', 'queue', 'priority', 'string', 'union-find', 'binary-tree'].includes(inferred) ? inferred : 'cells') : choice;
   const compact = vector.items.length > COMPACT_THRESHOLD;
   const rendered = vector.items.slice(0, MAX_RENDERED_CELLS);
   const operation = describeOperation(vector.operation, vector);
 
   return (
+    <ResizablePanel title={`Vetor ${vector.name}`} className="vector-item-workspace">
     <div className="vector-view" data-testid={`vector-${vector.name}`}>
       <div className="vector-head">
         <strong>{vector.name}</strong>
+        <span>size {vector.size ?? vector.items.length}</span>
+        <select value={choice} onChange={event => setChoice(event.target.value as typeof choice)} aria-label={`Visualização de ${vector.name}`} className="structure-view-select">
+          <option value="auto">Automática</option><option value="cells">Células do vetor</option>
+          {STRUCTURE_VIEWS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
         {vector.range && (
           <span>
             intervalo [{vector.range.start}, {vector.range.end}]
@@ -53,22 +66,26 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
         {vector.pivot !== null && <span>pivô: índice {vector.pivot}</span>}
         {operation && <span>{operation}</span>}
       </div>
-      {vector.items.length === 0 ? (
-        <div className="vector-empty">vetor vazio</div>
+      {view !== 'cells' ? <StructureView snapshot={{ name: vector.name, items: vector.items.map(item => vector.kind === 'string' && view === 'string' ? String.fromCharCode(item.value) : item.displayValue ?? String(item.value)), kind: vector.kind, size: vector.size, initialized: vector.initialized, truncated: vector.truncated, changes: vector.changes }} view={view} showSelector={false} /> : vector.items.length === 0 ? (
+        <div className="vector-empty">{vector.initialized === false ? 'ainda não inicializado' : 'vazio (size 0)'}</div>
       ) : (
         <div className={`vector-cells ${compact ? 'vector-cells-compact' : ''}`}>
           {rendered.map((item) => (
             <div
               key={item.index}
-              className={`vector-cell vector-cell-${item.state}`}
+              className={`vector-cell vector-cell-${item.state} ${vector.changes?.find(change => change.index === item.index && change.kind !== 'removed') ? `structure-change-${vector.changes.find(change => change.index === item.index && change.kind !== 'removed')!.kind}` : ''}`}
               title={`${item.index}: ${item.displayValue ?? item.value} (${STATE_LABEL[item.state]})`}
             >
               <span className="vector-index">{item.index}</span>
-              <span className="vector-value">{compact ? '' : (item.displayValue ?? item.value)}</span>
+              <span className="vector-value">{item.displayValue ?? item.value}</span>
+              {vector.changes?.filter(change => change.index === item.index && change.kind !== 'removed').slice(-1).map(change => <span className="vector-index" key={change.kind}>{CHANGE_LABELS[change.kind].symbol} {CHANGE_LABELS[change.kind].label}</span>)}
+              {item.state !== 'default' && <span className="vector-index">{STATE_LABEL[item.state]}</span>}
             </div>
           ))}
         </div>
       )}
+      {vector.changes?.some(change => change.kind === 'removed') && <div className="structure-removals" role="status">{vector.changes.filter(change => change.kind === 'removed').slice(0, 16).map(change => <span className="structure-change-removed" key={change.index}>− [{change.index}] {change.before}</span>)}</div>}
+      {!!vector.truncated && <div className="vector-note">+{vector.truncated} elementos não capturados</div>}
       {vector.items.length > MAX_RENDERED_CELLS && (
         <div className="vector-note">
           exibindo os primeiros {MAX_RENDERED_CELLS} de {vector.items.length} elementos
@@ -86,6 +103,7 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
         </p>
       )}
     </div>
+    </ResizablePanel>
   );
 }
 
@@ -101,6 +119,7 @@ export function VectorSortPanel({
   if (vectors.length === 0) return null;
 
   return (
+    <ResizablePanel title="Vetores" className={`vectors-workspace ${solo ? 'vectors-workspace-solo' : ''}`} fill={solo}>
     <div className={`vector-panel ${solo ? 'vector-panel-solo' : ''}`}>
       {vectors.map((vector) => (
         <VectorView key={vector.name} vector={vector} />
@@ -115,5 +134,6 @@ export function VectorSortPanel({
         </ul>
       )}
     </div>
+    </ResizablePanel>
   );
 }

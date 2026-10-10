@@ -53,7 +53,17 @@ describe('VectorSortPanel', () => {
   });
 
   it('renderiza vetor vazio', () => {
-    expect(render([snapshot({ items: [], operation: null, range: null, pivot: null })])).toContain('vetor vazio');
+    expect(render([snapshot({ items: [], operation: null, range: null, pivot: null })])).toContain('vazio (size 0)');
+  });
+
+  it('mostra tipo semântico, tamanho real e valores de vetor compacto', () => {
+    const items = Array.from({ length: 70 }, (_, index) => ({ index, value: index + 1000, state: 'default' as const }));
+    const html = render([snapshot({ items, size: 300, truncated: 230, operation: null, range: null, pivot: null })]);
+    expect(html).toContain('1000');
+    expect(html).toContain('1069');
+    expect(html).toContain('size 300');
+    expect(html).toContain('+230 elementos não capturados');
+    expect(render([snapshot({ initialized: false, items: [], operation: null })])).toContain('ainda não inicializado');
   });
 
   it('não renderiza nada sem vetores', () => {
