@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Activity, CircleHelp, Clock3, Network } from 'lucide-react';
+import { Activity, CircleHelp, Clock3, Network, SlidersHorizontal } from 'lucide-react';
 import { WorkspaceSplit } from '@/components/workspace/WorkspaceSplit';
 import { PanelInteractionContext, ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { flushSync } from 'react-dom';
@@ -20,6 +20,9 @@ import { StructsPanel } from '@/components/visualizer/StructsPanel';
 import { ProgramConsole } from '@/components/visualizer/ProgramConsole';
 import { VectorSortPanel } from '@/components/visualizer/VectorSortPanel';
 import { GraphAnalysisPanel } from '@/components/visualizer/GraphAnalysisPanel';
+import { VisualizationPicker } from '@/components/visualizer/VisualizationPicker';
+import { DEFAULT_VISUALIZATION_SELECTION, selectVisualizationContent, traceVisualizationKeys, visualizationSelectionLabel } from '@/lib/visualizationSelection';
+import type { VisualizationKey, VisualizationSelection } from '@/lib/visualizationSelection';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { useVisualizerPlayer } from '@/hooks/useVisualizerPlayer';
 import { examples } from '@/lib/examples';
@@ -27,6 +30,7 @@ import { DEFAULT_CPP_CODE } from '@/lib/cppTemplate';
 import { convertToPureCpp } from '@/lib/codeConversion';
 import { exportJson } from '@/lib/export';
 import { terminalOutput } from '@/lib/terminalOutput';
+import { runspectApiUrl } from '@/lib/runspectApiUrl';
 import { captureSvgSnapshot, DEFAULT_SVG_OPTIONS } from '@/lib/svgExport';
 import type { SvgExportOptions, SvgSnapshot } from '@/lib/svgExport';
 import { boundedOperation, createRecordingPlan, recordVisualization, RecordingStopped, RECORDING_BG, throwIfRecordingAborted } from '@/lib/recording';
@@ -44,6 +48,8 @@ interface RecordingStage {
   layout: GraphLayout;
   runId: number;
   index: number;
+  selection: VisualizationSelection;
+  fallbackOutput: string;
 }
 interface RecordingSession {
   stop: AbortController;
@@ -67,11 +73,13 @@ interface VisualizationStageProps {
   layout: GraphLayout;
   runId: number;
   hasSteps: boolean;
+  selection: VisualizationSelection;
+  fallbackOutput?: string;
   graphRef?: React.Ref<GraphCanvasHandle>;
   staticRender?: boolean;
 }
 
-const VisualizationStage = React.memo(function VisualizationStage({ player, layout, runId, hasSteps, graphRef, staticRender = false }: VisualizationStageProps) {
+const VisualizationStage = React.memo(function VisualizationStage({ player, layout, runId, hasSteps, selection, fallbackOutput = '', graphRef, staticRender = false }: VisualizationStageProps) {
   const analysisKey = JSON.stringify({
     directed: player.directed,
     nodes: player.graphState.nodes.map(node => ({ id: node.id, label: node.label })),
@@ -79,24 +87,21 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   });
   const graphAnalysis = useMemo(() => {
     const topology = JSON.parse(analysisKey) as { directed: boolean; nodes: PlayerState['graphState']['nodes']; edges: PlayerState['graphState']['edges'] };
-    return topology.nodes.length ? analyzeGraph(topology.nodes, topology.edges, topology.directed) : null;
-  }, [analysisKey]);
+    return topology.nodes.length && (selection.graph || selection.analysis) ? analyzeGraph(topology.nodes, topology.edges, topology.directed) : null;
+  }, [analysisKey, selection.graph, selection.analysis]);
   const flowSummary = useMemo(() => {
     const message = [...player.logs].reverse().find((log) => /Fluxo:\s*\d+,\s*custo:\s*-?\d+/i.test(log));
     const match = message?.match(/Fluxo:\s*(\d+),\s*custo:\s*(-?\d+)/i);
     return match ? { flow: Number(match[1]), cost: Number(match[2]) } : null;
   }, [player.logs]);
 
-  const hasGraph = player.graphState.nodes.length > 0;
-  const hasVectors = player.vectors.length > 0;
-  const visibleStructs = player.structs.filter(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0));
-  const hasStructs = visibleStructs.length > 0 || player.matrices.length > 0 || player.calls.length > 0;
-  const hasVisualization = hasGraph || hasVectors || hasStructs;
-  const hasProgramConsole = !!player.programConsole.output || player.programConsole.warnings.length > 0;
+  const consoleOutput = player.programConsole.output || (player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1 ? fallbackOutput : '');
+  const { hasGraph, hasVectors, hasStructs, hasVisualization, hasConsole, hasAnalysis, hasContent, structs: visibleStructs, matrices, calls } = selectVisualizationContent({ ...player, programConsole: { ...player.programConsole, output: consoleOutput } }, selection);
+  const hasSelection = Object.values(selection).some(Boolean);
 
   return (
     <PanelInteractionContext.Provider value={!staticRender}>
-      {!hasGraph && player.caption && <ResizablePanel title="Descrição do passo"><div className="frame-caption frame-caption-inline" role="status">{player.caption}</div></ResizablePanel>}
+      {!hasGraph && hasVisualization && player.caption && <ResizablePanel title="Descrição do passo"><div className="frame-caption frame-caption-inline" role="status">{player.caption}</div></ResizablePanel>}
       <div className={`graph-stage ${!hasGraph && hasVisualization ? 'graph-stage-data-only' : ''} ${hasVectors && !hasGraph ? 'graph-stage-vector-only' : ''}`}>
         {hasGraph && (
           <ResizablePanel title="Grafo" className="graph-workspace" fill>
@@ -122,35 +127,40 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
           </div>
           </ResizablePanel>
         )}
-        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={player.matrices} calls={player.calls} primary solo={!hasVectors} />}
-        <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />
-        {!hasVisualization && hasProgramConsole && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
-        {!hasVisualization && !hasProgramConsole && (
+        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} primary solo={!hasVectors} />}
+        {hasVectors && <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />}
+        {hasConsole && <ProgramConsole output={consoleOutput} warnings={player.programConsole.warnings} />}
+        {!hasContent && (
           <div className="graph-panel">
             <div className="graph-empty-state">
               <Network className="h-8 w-8" />
-              {!hasSteps ? (
+              {!hasSelection ? (
                 <>
-                  <strong>Nenhuma visualização para exibir</strong>
-                  <span>Execute o algoritmo para visualizar os passos.</span>
+                  <strong>Somente o terminal está ativo</strong>
+                  <span>Use “Alterar visualizações” para escolher painéis.</span>
+                </>
+              ) : !hasSteps ? (
+                <>
+                  <strong>Escolha o que acompanhar</strong>
+                  <span>Ao executar, selecione as visualizações desejadas.</span>
                 </>
               ) : (
                 <>
-                  <strong>Nenhum dado visual neste passo</strong>
-                  <span>Avance na linha do tempo para acompanhar o algoritmo.</span>
+                  <strong>Nenhum dado dos painéis selecionados neste passo</strong>
+                  <span>Avance na linha do tempo ou altere as visualizações.</span>
                 </>
               )}
             </div>
           </div>
         )}
-        {hasGraph && <ResizablePanel title="Legenda"><GraphLegend /></ResizablePanel>}
+        {hasGraph && selection.legend && <ResizablePanel title="Legenda"><GraphLegend /></ResizablePanel>}
+        {hasAnalysis && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
       </div>
-      {!staticRender && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
-      {hasGraph && <StructsPanel structs={player.structs} matrices={player.matrices} calls={player.calls} />}
-      {hasVisualization && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
+      {hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} />}
     </PanelInteractionContext.Provider>
   );
-}, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
+}, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.selection === next.selection && previous.fallbackOutput === next.fallbackOutput && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
+  (!next.fallbackOutput || (previous.player.currentStepIndex === next.player.currentStepIndex && previous.player.totalSteps === next.player.totalSteps)) &&
   (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
@@ -170,6 +180,8 @@ export default function Home() {
   const [hasError, setHasError] = useState(false);
   const [traceMode, setTraceMode] = useState<ExecutionResult['trace_mode']>();
   const [isLoading, setIsLoading] = useState(false);
+  const [visualizationSelection, setVisualizationSelection] = useState(DEFAULT_VISUALIZATION_SELECTION);
+  const [visualizationPicker, setVisualizationPicker] = useState<{ source: string; input: string; execute: boolean; available?: VisualizationKey[] } | null>(null);
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [fullscreen, setFullscreen] = useState(false);
@@ -229,10 +241,8 @@ export default function Home() {
     }
   };
 
-  const hasGraph = player.graphState.nodes.length > 0;
-  const hasVectors = player.vectors.length > 0;
-  const hasStructs = player.structs.some(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0)) || player.matrices.length > 0 || player.calls.length > 0;
-  const hasVisualization = hasGraph || hasVectors || hasStructs;
+  const { hasGraph, hasContent } = selectVisualizationContent(player, visualizationSelection);
+  const hasVisualization = hasContent || (visualizationSelection.output && !!untracedOutput);
 
   const playbackCompleted = player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1;
   const terminalText = isLoading || hasError || steps.length === 0
@@ -247,7 +257,7 @@ export default function Home() {
       const timeout = window.setTimeout(() => controller.abort(), 3000);
 
       try {
-        const response = await fetch('/healthz', {
+        const response = await fetch(runspectApiUrl('/healthz'), {
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -360,7 +370,7 @@ export default function Home() {
     let snapshotCapture: RecordingCapture | undefined;
 
     try {
-      flushSync(() => setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId, index: 0 }));
+      flushSync(() => setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId, index: 0, selection: visualizationSelection, fallbackOutput: untracedOutput }));
       const result = await recordVisualization({
         plan,
         stop: session.stop.signal,
@@ -431,7 +441,7 @@ export default function Home() {
     setHasError(false);
     setOutput('Compilando e executando...');
     try {
-      const response = await fetch('/api/run', {
+      const response = await fetch(runspectApiUrl('/api/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: source, stdin: input }),
@@ -443,7 +453,7 @@ export default function Home() {
       } catch {
         throw new Error(
           response.status === 502 || response.status === 504
-            ? 'O frontend não conseguiu alcançar o backend. Inicie o servidor Go ou configure RUNSPECT_API_URL.'
+            ? 'O frontend não conseguiu alcançar o backend. Configure RUNSPECT_API_URL nas variáveis de Actions e publique novamente.'
             : `O servidor retornou uma resposta inválida (HTTP ${response.status}).`,
         );
       }
@@ -464,7 +474,7 @@ export default function Home() {
       setHasError(true);
       if (error instanceof TypeError) {
         setBackendStatus('disconnected');
-        setOutput(`Não foi possível conectar ao servidor de execução. Verifique se o backend Go está rodando em http://127.0.0.1:8080. (${error.message || 'falha de rede'})`);
+          setOutput(`Não foi possível conectar ao servidor de execução. Verifique RUNSPECT_API_URL nas variáveis de Actions e a URL pública do backend Go. (${error.message || 'falha de rede'})`);
       } else {
         setOutput(error instanceof Error ? error.message : 'Não foi possível executar o código.');
       }
@@ -474,12 +484,17 @@ export default function Home() {
     }
   };
 
+  const requestRun = (source = code, input = stdin) => {
+    if (recordingSessionRef.current || runRequestRef.current) return;
+    setVisualizationPicker({ source, input, execute: true });
+  };
+
   const loadDocumentationExample = (method: DocumentationMethod, execute: boolean) => {
     setCode(method.example);
     setCustomCode(method.example);
     setStdin(method.stdin ?? '');
     setEditorTab('custom');
-    if (execute) void runCode(method.example, method.stdin ?? '');
+    if (execute) requestRun(method.example, method.stdin ?? '');
     setShowDocumentation(false);
   };
 
@@ -500,7 +515,13 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <div className="flex items-center gap-3">
-          <div className="brand-mark"><Network className="h-4 w-4" /></div>
+          <div className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" className="h-5 w-5">
+              <path d="M21 47V17h13a10 10 0 0 1 0 20H21m13 0 11 10" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6" />
+              <circle cx="21" cy="17" r="3" fill="#22d3ee" />
+              <circle cx="45" cy="47" r="3" fill="#60a5fa" />
+            </svg>
+          </div>
           <div><p className="brand-name">RUNSPECT</p><p className="brand-subtitle">algorithms lab</p></div>
         </div>
         <div className="topbar-context">
@@ -612,7 +633,7 @@ export default function Home() {
                 setCode(nextCode);
                 if (editorTab === 'custom') setCustomCode(nextCode);
               }}
-              onRun={() => void runCode()}
+              onRun={() => requestRun()}
               isLoading={isLoading}
               output={terminalText}
               hasError={hasError}
@@ -639,6 +660,9 @@ export default function Home() {
           className={`visualizer-column ${fullscreen ? 'visualizer-fullscreen' : ''} ${isRecording ? 'visualizer-recording' : ''}`}
         >
           <div className="visualizer-header">
+            <button type="button" className="visualization-selection-trigger" aria-label="Alterar visualizações" aria-haspopup="dialog" disabled={isRecording || isLoading} onClick={() => setVisualizationPicker({ source: code, input: stdin, execute: false, available: steps.length ? traceVisualizationKeys(steps, untracedOutput) : undefined })}>
+              <SlidersHorizontal size={14} /><span>{visualizationSelectionLabel(visualizationSelection)}</span><small>alterar</small>
+            </button>
             {traceMode === 'automatic' && <span className="text-xs text-slate-400">automática</span>}
             <GraphToolbar
               layout={layout}
@@ -677,11 +701,13 @@ export default function Home() {
               layout={layout}
               runId={runId}
               hasSteps={steps.length > 0}
+              selection={visualizationSelection}
+              fallbackOutput={untracedOutput}
               graphRef={graphRef}
             />
           </div>
 
-          <ResizablePanel title="Linha do tempo">
+          {Object.values(visualizationSelection).some(Boolean) && <ResizablePanel title="Linha do tempo">
           <TimelineControls
             disabled={isRecording}
             currentStep={player.currentStepIndex}
@@ -694,7 +720,7 @@ export default function Home() {
             onSeek={player.seek}
             onSpeedChange={player.setSpeed}
           />
-          </ResizablePanel>
+          </ResizablePanel>}
           {svgSnapshot && <SvgExportDialog snapshot={svgSnapshot} options={svgOptions} onOptionsChange={setSvgOptions} filename={`runspect-grafo-passo-${player.currentStepIndex + 1}.svg`} onClose={() => setSvgSnapshot(null)} />}
         </div>
       </WorkspaceSplit>
@@ -702,10 +728,15 @@ export default function Home() {
       <footer className="workspace-footer">
         <span><Clock3 className="h-3.5 w-3.5" /> passo {player.totalSteps ? player.currentStepIndex + 1 : 0} de {player.totalSteps}</span>
         <span className="footer-divider" />
-        <span>visualizações: vetores · grafos · estruturas</span>
+        <span className="footer-visualization-selection">visualizações: {visualizationSelectionLabel(visualizationSelection)}</span>
         <button className="footer-action" onClick={() => setShowDocumentation(true)} type="button"><CircleHelp className="h-3.5 w-3.5" /> documentação da API</button>
       </footer>
       {showDocumentation && <DocumentationPanel onClose={() => setShowDocumentation(false)} onLoad={loadDocumentationExample} />}
+      {visualizationPicker && <VisualizationPicker selection={visualizationSelection} source={visualizationPicker.source} available={visualizationPicker.available} execute={visualizationPicker.execute} onClose={() => setVisualizationPicker(null)} onConfirm={selection => {
+        setVisualizationSelection(selection);
+        setVisualizationPicker(null);
+        if (visualizationPicker.execute) void runCode(visualizationPicker.source, visualizationPicker.input);
+      }} />}
 
       {recordingStage && (
         <div
@@ -738,6 +769,8 @@ export default function Home() {
               layout={recordingStage.layout}
               runId={recordingStage.runId}
               hasSteps={recordingStage.steps.length > 0}
+              selection={recordingStage.selection}
+              fallbackOutput={recordingStage.fallbackOutput}
               staticRender
             />
           </div>

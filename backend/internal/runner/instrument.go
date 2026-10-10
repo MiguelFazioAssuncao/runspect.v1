@@ -10,8 +10,9 @@ import (
 )
 
 type instrumentation struct {
-	Mode     string   `json:"mode"`
-	Warnings []string `json:"warnings"`
+	Mode         string   `json:"mode"`
+	Warnings     []string `json:"warnings"`
+	Capabilities []string `json:"capabilities"`
 }
 
 func compilerCachePath() string {
@@ -137,7 +138,11 @@ func cppTokens(code string) []string {
 }
 
 func (r *CppRunner) instrument(dir, code string) (instrumentation, string) {
-	if explicitlyInstrumented(code) {
+	return r.instrumentSource(context.Background(), dir, code, false)
+}
+
+func (r *CppRunner) instrumentSource(parent context.Context, dir, code string, analyzeOnly bool) (instrumentation, string) {
+	if !analyzeOnly && explicitlyInstrumented(code) {
 		return instrumentation{Mode: "manual"}, ""
 	}
 	for _, name := range []string{"automatic.h", "instrument_cpp.py"} {
@@ -149,10 +154,13 @@ func (r *CppRunner) instrument(dir, code string) (instrumentation, string) {
 			return instrumentation{}, "Falha ao preparar a visualização automática"
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), r.AnalysisTimeout)
+	ctx, cancel := context.WithTimeout(parent, r.AnalysisTimeout)
 	defer cancel()
 	base := r.baseDir(dir)
 	args := []string{"python3", "-B", base + "/instrument_cpp.py", base + "/solution.cpp"}
+	if analyzeOnly {
+		args = append(args, "--analyze-only")
+	}
 	if r.CompilerCachePath != "" {
 		args = append(args, "--cache", r.CompilerCachePath)
 	}

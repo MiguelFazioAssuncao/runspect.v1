@@ -1,3 +1,4 @@
+import { confirmAllVisualizations } from './browser-selection.mjs';
 import assert from 'node:assert/strict';
 import { writeFile, mkdir } from 'node:fs/promises';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
@@ -9,7 +10,7 @@ const results=[];const output=process.env.RECORDING_OUTPUT||'/tmp/runspect-recor
 for(const [id,speed,layout] of (process.env.EXAMPLE_CASES?JSON.parse(process.env.EXAMPLE_CASES):[['binary-search',.5,'force'],['bubble-sort',4,'force'],['bfs-shortest-path',8,'circular'],['bfs-shortest-path',16,'force']])){
  await page.getByLabel('Selecionar técnica de programação competitiva').selectOption(id);
  const response=page.waitForResponse(r=>r.url().endsWith('/api/run'));
- await page.getByRole('button',{name:'Executar Algoritmo'}).click();const execution=await (await response).json();assert.equal(execution.success,true); console.log("executed",id,execution.steps.length);
+ await page.getByRole('button',{name:'Executar Algoritmo'}).click(); await confirmAllVisualizations(page);const execution=await (await response).json();assert.equal(execution.success,true); console.log("executed",id,execution.steps.length);
  await writeFile(`${output}/trace-${id}.json`,JSON.stringify(execution));
  await page.getByRole('button',{name:'Executar Algoritmo'}).waitFor({state:'visible'});
  await page.waitForFunction(()=>document.querySelector('.timeline-step')?.textContent.match(/\/ [1-9]/));

@@ -1140,6 +1140,41 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* Workspace panels and drag handles. */
+.visualization-selection-trigger { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 7px 10px; border: 1px solid #334155; border-radius: 7px; background: #0d1523; color: #cbd5e1; font-size: 11px; }
+.visualization-selection-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.visualization-selection-trigger svg { flex-shrink: 0; color: #60a5fa; }
+.visualization-selection-trigger small { color: #93c5fd; }
+.visualization-selection-trigger:disabled { opacity: .5; }
+.visualization-picker { width: min(660px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); max-width: none; margin: auto; padding: 0; border: 1px solid #334155; border-radius: 14px; background: #0b111b; color: #e2e8f0; box-shadow: 0 24px 80px #0009; overflow: auto; }
+.visualization-picker::backdrop { background: #020617b8; backdrop-filter: blur(4px); }
+.visualization-picker-header { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; padding: 22px 24px 18px; border-bottom: 1px solid #1e293b; }
+.visualization-picker-header h2 { margin: 0; font-size: 19px; letter-spacing: -.03em; }
+.visualization-picker-header p { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: #94a3b8; }
+.visualization-picker-header > button { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 5px; background: #172131; color: #94a3b8; }
+.visualization-picker-options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin: 0; padding: 20px 24px; min-width: 0; border: 0; }
+.visualization-picker-option { display: flex; align-items: flex-start; gap: 10px; padding: 14px 12px; border: 1px solid #26354a; border-radius: 8px; cursor: pointer; background: #0d1523; }
+.visualization-picker-option:has(input:checked) { background: #2563eb18; border-color: #3b82f6; }
+.visualization-picker-option:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.visualization-picker-option input { flex-shrink: 0; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #3b82f6; cursor: pointer; }
+.visualization-picker-option strong { display: block; font-size: 12px; }
+.visualization-picker-option small { display: block; margin-top: 5px; color: #94a3b8; font-size: 11px; line-height: 1.5; }
+.visualization-picker-footer { padding: 14px 24px 20px; border-top: 1px solid #1e293b; }
+.visualization-picker-footer p { margin: 0 0 14px; color: #94a3b8; font-size: 11px; line-height: 1.5; }
+.visualization-picker-footer > div { display: flex; justify-content: flex-end; gap: 8px; }
+.visualization-picker-confirm { padding: 9px 14px; color: white; background: #2563eb; border: 1px solid #3b82f6; border-radius: 6px; font-size: 12px; }
+.visualization-picker-confirm:hover { background: #3b82f6; }
+.visualization-picker-confirm:disabled { opacity: .5; }
+.visualization-picker-message { padding: 24px; margin: 0; color: #94a3b8; font-size: 13px; line-height: 1.6; }
+:is(.visualization-picker, .visualization-selection-trigger) :is(button, input):focus-visible, .visualization-selection-trigger:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+.footer-visualization-selection { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.visualizer-fullscreen .graph-analysis, .visualizer-column:fullscreen .graph-analysis { display: block; }
+@media (max-width: 600px) {
+  .visualization-picker { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .visualization-picker-header, .visualization-picker-options, .visualization-picker-footer { padding: 16px; }
+  .visualization-picker-options { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .visualization-picker-option { padding: 12px; }
+  .visualization-picker-footer { position: sticky; bottom: 0; background: #0b111b; }
+}
 .workspace-split {
   grid-template-columns: minmax(0, calc(var(--workspace-ratio) * (100% - 12px))) 12px minmax(0, 1fr);
   gap: 0;

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:panels": "node scripts/panels-browser.mjs",
+    "test:capabilities": "node scripts/capabilities-browser.mjs",
     "test:cpp": "vitest run --config vitest.cpp.config.mts"
   },
   "dependencies": {

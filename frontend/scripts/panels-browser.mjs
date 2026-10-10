@@ -1,3 +1,4 @@
+import { confirmAllVisualizations, mockVisualizationAnalysis } from './browser-selection.mjs';
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/panels-browser.mjs
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -63,8 +64,10 @@ page.setDefaultTimeout(30000);
 let steps = [];
 const event = (step_event, data = {}) => steps.push({ step: steps.length, step_event, data });
 const errors = [];
+let executions = 0;
 page.on('pageerror', error => errors.push(error.message));
-await page.route('**/api/run', route => route.fulfill({ json: { success: true, steps, time_ms: 1 } }));
+await mockVisualizationAnalysis(page, () => steps);
+await page.route('**/api/run', route => { executions++; return route.fulfill({ json: { success: true, steps, time_ms: 1 } }); });
 await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
 await page.route('**/healthz', route => route.fulfill({ json: { status: 'ok' } }));
 async function drag(handle, delta, horizontal = false) {
@@ -111,15 +114,65 @@ try {
   event('SET_STRUCT', { name: 'fila', kind: 'queue', items: ['1', '2'] });
   event('SET_MATRIX', { name: 'dp', rows: [['0', '1'], ['1', '2']] });
   event('CALL_ENTER', { id: 1, parent: null, function: 'main', depth: 0, line: 1 });
+  event('CALL_ENTER', { id: 2, parent: 1, function: 'recurse', depth: 1, line: 1 });
   event('PROGRAM_OUTPUT', { text: '42\n' });
   event('STEP', { caption: 'Primeiro passo' });
   event('VECTOR_SET', { name: 'a', index: 0, value: 4 });
   event('STEP', { caption: 'Segundo passo' });
+  const picker = page.getByRole('dialog', { name: 'Escolha o que visualizar' });
   await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+  await picker.waitFor();
+  await page.waitForFunction(() => document.querySelector('.visualization-picker-confirm')?.disabled === false);
+  assert.equal(executions, 0, 'Opening the picker must not execute the code');
+  assert.equal(await picker.getByRole('checkbox', { name: 'Grafo', exact: false }).first().isChecked(), true);
+  assert.equal(await picker.getByRole('checkbox').filter({ visible: true }).count(), 8);
+  await picker.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  assert.equal(executions, 0);
+  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+  await picker.getByRole('button', { name: 'Executar com seleção', exact: true }).click();
+  await toggle('Minimizar', 'Grafo').waitFor();
+  assert.equal(executions, 1);
+  for (const title of ['Vetores', 'Análise do grafo', 'Legenda', 'Estruturas e variáveis', 'Saída do programa']) {
+    assert.equal(await toggle('Minimizar', title).count(), 0, title);
+  }
+  assert.equal(await page.getByRole('button', { name: 'Aumentar zoom', exact: true }).isVisible(), true);
+  // Modify the panels of the existing trace without contacting the backend.
+  for (const [key, expected, absent] of [
+    ['Vetores', 'Vetores', 'Grafo'],
+    ['Matrizes e DP', 'Matriz dp', 'Variável fila'],
+    ['Chamadas de funções', 'Chamadas de funções', 'Matriz dp'],
+    ['Saída do programa', 'Saída do programa', 'Grafo'],
+    ['Análise do grafo', 'Análise do grafo', 'Grafo'],
+  ]) {
+    await page.getByRole('button', { name: 'Alterar visualizações', exact: true }).click();
+    for (const checkbox of await picker.getByRole('checkbox').all()) await checkbox.uncheck();
+    await picker.getByRole('checkbox', { name: new RegExp(`^${key} `) }).check();
+    await picker.getByRole('button', { name: 'Aplicar seleção', exact: true }).click();
+    await toggle('Minimizar', expected).waitFor();
+    assert.equal(await toggle('Minimizar', absent).count(), 0, absent);
+    assert.equal(executions, 1);
+    assert.equal(await page.getByRole('button', { name: 'Aumentar zoom', exact: true }).count(), 0);
+  }
+  await page.getByRole('button', { name: 'Alterar visualizações', exact: true }).click();
+  for (const checkbox of await picker.getByRole('checkbox').all()) await checkbox.uncheck();
+  await picker.getByRole('button', { name: 'Aplicar seleção', exact: true }).click();
+  await page.getByText('Somente o terminal está ativo', { exact: true }).waitFor();
+  assert.equal(executions, 1);
+  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+  await picker.waitFor();
+  assert.equal(await picker.locator('input:checked').count(), 0, 'Previous choices must be remembered');
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.screenshot({ path: '/tmp/runspect-visualization-picker-mobile.png', fullPage: true });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.screenshot({ path: '/tmp/runspect-visualization-picker-desktop.png', fullPage: true });
+  await page.keyboard.press('Escape');
+  assert.equal(executions, 1);
+  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click(); await confirmAllVisualizations(page);
   await toggle('Minimizar', 'Grafo').waitFor();
   await page.getByLabel('Posição na linha do tempo').press('End');
   const step = await page.locator('.timeline-step').textContent();
-  for (const title of ['Grafo', 'Vetores', 'Vetor a', 'Análise do grafo', 'Legenda', 'Estruturas e variáveis', 'Variável fila', 'Matriz dp', 'Chamadas recursivas', 'Pilha de chamadas', 'Árvore de chamadas', 'Saída do programa', 'Linha do tempo', 'Editor', 'Terminal']) {
+  for (const title of ['Grafo', 'Vetores', 'Vetor a', 'Análise do grafo', 'Legenda', 'Estruturas e variáveis', 'Variável fila', 'Matriz dp', 'Chamadas de funções', 'Pilha de chamadas', 'Árvore de chamadas', 'Saída do programa', 'Linha do tempo', 'Editor', 'Terminal']) {
     const body = panel(title).locator(':scope > .resizable-panel-body');
     await toggle('Minimizar', title).click();
     assert.equal(await body.isVisible(), false, title);
@@ -164,7 +217,7 @@ try {
   assert.ok((await mobileGraph.boundingBox()).height < mobileHeight - 40);
   await page.screenshot({ path: '/tmp/runspect-panels-mobile.png', fullPage: true });
   assert.deepEqual(errors, []);
-  console.log('PASS: arraste, teclado, minimizar/restaurar todos os painéis, preservação do código/playback e layout mobile.');
+  console.log('PASS: escolha antes da execução, cancelar/Escape, filtros sem reexecução, memória da seleção, seleção no celular, arraste e minimizar/restaurar painéis.');
 } finally {
   await browser.close();
   await server?.close();

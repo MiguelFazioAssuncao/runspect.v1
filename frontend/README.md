@@ -62,19 +62,22 @@ Abra `http://localhost:3000`. Sem configuração adicional, o rewrite de
 [`next.config.ts`](./next.config.ts) encaminha `/api/*` para
 `http://127.0.0.1:8080`.
 
-## Deploy do frontend na Vercel
+## Deploy do frontend no GitHub Pages
 
-1. Publique este repositório no GitHub (se ainda não estiver publicado).
-2. Em [vercel.com/new](https://vercel.com/new), importe o repositório.
-3. Em **Root Directory**, selecione `frontend`.
-4. Mantenha o build padrão do Next.js (`npm run build`).
-5. Adicione a variável de ambiente `RUNSPECT_API_URL` com a URL pública do
-   backend, por exemplo `https://api.exemplo.com`, nos ambientes **Preview** e
-   **Production**.
-6. Faça o deploy e teste o botão de execução.
+O workflow [deploy-pages.yml](../.github/workflows/deploy-pages.yml) exporta o
+frontend como arquivos estáticos e publica o resultado no GitHub Pages a cada
+push para `main`. O build calcula o caminho do repositório automaticamente.
 
-`RUNSPECT_API_URL` é usada pelo rewrite do Next.js; não inclua `/api` no valor,
-pois o caminho `/api/:path*` é acrescentado automaticamente.
+1. Em **Settings → Pages → Build and deployment**, selecione **GitHub Actions**.
+2. Se o backend estiver publicado, abra **Settings → Secrets and variables →
+   Actions → Variables** e crie `RUNSPECT_API_URL` com a URL pública do backend,
+   por exemplo `https://api.exemplo.com` (sem `/api` no final).
+3. Faça push para `main` ou execute o workflow em **Actions → Deploy GitHub
+   Pages → Run workflow**.
+
+O endereço do site será `https://miguelfazioassuncao.github.io/runspect.v1/`.
+Sem `RUNSPECT_API_URL`, a interface abre, mas execução e análise de código
+ficam indisponíveis porque o GitHub Pages não executa o backend Go.
 
 ### Deploy gratuito do backend no Render
 
@@ -90,12 +93,12 @@ o mesmo repositório e configure:
 Adicione estas variáveis no Render:
 
 ```bash
-RUNSPECT_ALLOWED_ORIGINS=https://seu-projeto.vercel.app
+RUNSPECT_ALLOWED_ORIGINS=https://miguelfazioassuncao.github.io
 ```
 
 O backend detecta automaticamente a variável `PORT` fornecida pelo Render.
-Depois do primeiro deploy, copie a URL `https://...onrender.com` para a
-variável `RUNSPECT_API_URL` na Vercel e faça um novo deploy.
+Depois do primeiro deploy, copie a URL `https://...onrender.com` para a variável
+`RUNSPECT_API_URL` do repositório e execute novamente o workflow do GitHub Pages.
 
 O plano gratuito pode suspender o serviço após inatividade; a primeira
 execução depois disso pode demorar aproximadamente um minuto. Para uma
