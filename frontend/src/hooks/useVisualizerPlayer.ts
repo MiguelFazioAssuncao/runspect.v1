@@ -11,7 +11,8 @@ import {
 import { createVectorReplay } from '@/lib/vectorReducer';
 import { playerStartFrame } from '@/lib/playerStart';
 import { startPlayback } from '@/lib/playback';
-import { programConsoleAt } from '@/lib/programConsole';
+import { createTraceReplay } from '@/lib/traceState';
+import { diffStructureItems } from '@/lib/structureViews';
 
 export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = false, recordingIndex?: number) {
   const [position, setPosition] = useState({ steps, index: 0 });
@@ -91,6 +92,8 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
 
   const replayGraph = useMemo(() => createGraphReplay(steps), [steps]);
   const replayVectors = useMemo(() => createVectorReplay(steps), [steps]);
+  const replayPreviousVectors = useMemo(() => createVectorReplay(steps), [steps]);
+  const replayTrace = useMemo(() => createTraceReplay(steps), [steps]);
   const graphState = useMemo(
     () => replayGraph(eventIndex, directed, multi),
     [replayGraph, eventIndex, directed, multi]
@@ -99,44 +102,18 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
   const vectorState = useMemo(() => replayVectors(eventIndex), [replayVectors, eventIndex]);
 
   const caption = useMemo(() => frameCaption(steps, eventIndex), [steps, eventIndex]);
-  const programConsole = useMemo(() => programConsoleAt(steps, eventIndex), [steps, eventIndex]);
-
-  const logs = useMemo(() => {
-    const lines: string[] = [];
-    for (let i = 0; i <= eventIndex && i < steps.length; i++) {
-      const step = steps[i];
-      if (step.step_event === 'PRINT' && step.data?.message !== undefined) {
-        lines.push(String(step.data.message));
-      }
-    }
-    return lines;
-  }, [steps, eventIndex]);
-
-  const structs = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (let i = 0; i <= eventIndex && i < steps.length; i++) {
-      const step = steps[i];
-      if (step.step_event === 'SET_STRUCT' && typeof step.data?.name === 'string') {
-        const items = Array.isArray(step.data.items) ? step.data.items.map(String) : [];
-        map.set(step.data.name, items);
-      }
-    }
-    return Array.from(map, ([name, items]) => ({ name, items }));
-  }, [steps, eventIndex]);
-
-  const matrices = useMemo(() => {
-    const map = new Map<string, string[][]>();
-    for (let i = 0; i <= eventIndex && i < steps.length; i++) {
-      const step = steps[i];
-      if (step.step_event === 'SET_MATRIX' && typeof step.data?.name === 'string') {
-        const rows = Array.isArray(step.data.rows)
-          ? step.data.rows.map((row) => (Array.isArray(row) ? row.map(String) : []))
-          : [];
-        map.set(step.data.name, rows);
-      }
-    }
-    return Array.from(map, ([name, rows]) => ({ name, rows }));
-  }, [steps, eventIndex]);
+  const traceState = useMemo(() => replayTrace(eventIndex), [replayTrace, eventIndex]);
+  const previousVectors = useMemo(() => replayPreviousVectors(frames[normalizedStepIndex - 1] ?? -1), [replayPreviousVectors, frames, normalizedStepIndex]);
+  const vectors = useMemo(() => vectorState.vectors.map(vector => {
+    const previous = previousVectors.vectors.find(candidate => candidate.name === vector.name);
+    const meta = traceState.vectorMeta[vector.name];
+    const changes = diffStructureItems(previous?.items.map(item => item.displayValue ?? String(item.value)) ?? [], vector.items.map(item => item.displayValue ?? String(item.value)), meta?.kind);
+    vector.items.forEach(item => {
+      if (item.state === 'comparing' && !changes.some(change => change.index === item.index)) changes.push({ index: item.index, kind: 'compared', after: item.displayValue ?? String(item.value) });
+    });
+    return { ...vector, ...meta, changes };
+  }), [vectorState, previousVectors, traceState]);
+  const programConsole = useMemo(() => ({ output: traceState.output, warnings: traceState.warnings }), [traceState]);
 
   return {
     currentStepIndex: normalizedStepIndex,
@@ -150,12 +127,16 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     directed,
     weighted,
     multi,
-    vectors: vectorState.vectors,
+    vectors,
     vectorIssues: vectorState.issues,
-    logs,
+    logs: traceState.logs,
     programConsole,
-    structs,
-    matrices,
+    structs: traceState.structs,
+    matrices: traceState.matrices,
+    calls: traceState.calls,
+    reads: traceState.reads,
+    writes: traceState.writes,
+    vectorMeta: traceState.vectorMeta,
     setIsPlaying: changePlaying,
     setSpeed,
     nextStep,

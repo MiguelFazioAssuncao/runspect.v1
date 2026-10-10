@@ -63,9 +63,9 @@ describe('cores de conclusão na visualização automática', () => {
     const end = vectorsAtEnd(steps);
     expect(end.issues).toEqual([]);
     expect(end.vectors.find((vector) => vector.name === 'dist')!.items.map((item) => item.displayValue)).toEqual([undefined, '∞', '∞']);
-    expect(end.vectors.find((vector) => vector.name === 'distance')!.items[1].displayValue).toBeUndefined();
+    expect(end.vectors.find((vector) => vector.name === 'distance')!.items[1].displayValue).toBe('9223372036854775806');
     expect(end.vectors.find((vector) => vector.name === 'distancia')!.items[1].displayValue).toBe('∞');
-    expect(end.vectors.find((vector) => vector.name === 'dados')!.items[0].displayValue).toBeUndefined();
+    expect(end.vectors.find((vector) => vector.name === 'dados')!.items[0].displayValue).toBe('9223372036854775807');
     const write = steps.findIndex((step) => step.step_event === 'VECTOR_SET' && step.data?.name === 'dist' && step.data?.value === 7);
     expect(buildVectorsState(steps, write).vectors.find((vector) => vector.name === 'dist')!.items[1].displayValue).toBeUndefined();
     expect(steps.some((step) => step.data?.caption === 'Atualiza dist[1] = ∞')).toBe(true);

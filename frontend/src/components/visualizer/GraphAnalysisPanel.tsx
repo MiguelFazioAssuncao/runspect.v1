@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ResizablePanel } from '@/components/workspace/ResizablePanel';
 import type { GraphAnalysis } from '@/lib/graphAnalysis';
 
 interface GraphAnalysisPanelProps {
@@ -45,6 +46,7 @@ export const GraphAnalysisPanel: React.FC<GraphAnalysisPanelProps> = ({ analysis
   ];
 
   return (
+    <ResizablePanel title="Análise do grafo" className="analysis-workspace">
     <section className="graph-analysis" aria-label="Análise do grafo">
       <div className="graph-analysis-title">análise do grafo</div>
       <div className="graph-analysis-grid">
@@ -55,8 +57,8 @@ export const GraphAnalysisPanel: React.FC<GraphAnalysisPanelProps> = ({ analysis
           </div>
         ))}
       </div>
-      <details className="graph-analysis-advanced">
-        <summary>análises avançadas</summary>
+      <ResizablePanel title="Análises avançadas" defaultCollapsed>
+      <div className="graph-analysis-advanced">
         {analysis.advancedAnalysisSkipped ? (
           <p className="graph-analysis-note">{analysis.advancedAnalysisReason}</p>
         ) : (
@@ -69,7 +71,8 @@ export const GraphAnalysisPanel: React.FC<GraphAnalysisPanelProps> = ({ analysis
             ))}
           </div>
         )}
-      </details>
+      </div>
+      </ResizablePanel>
       {flowSummary && (
         <div className="graph-analysis-detail">
           fluxo enviado: {flowSummary.flow} · custo total: {flowSummary.cost}
@@ -91,5 +94,6 @@ export const GraphAnalysisPanel: React.FC<GraphAnalysisPanelProps> = ({ analysis
         </div>
       )}
     </section>
+    </ResizablePanel>
   );
 };

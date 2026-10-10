@@ -118,6 +118,11 @@ export interface VectorSnapshot {
   pivot: number | null;
   caption: string;
   result: number[] | null;
+  kind?: string;
+  size?: number;
+  initialized?: boolean;
+  truncated?: number;
+  changes?: import('@/lib/structureViews').StructureChange[];
 }
 
 export interface VectorIssue {

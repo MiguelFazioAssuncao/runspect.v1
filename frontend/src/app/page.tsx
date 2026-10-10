@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Activity, CircleHelp, Clock3, Code2, Network } from 'lucide-react';
+import { Activity, CircleHelp, Clock3, Network } from 'lucide-react';
+import { WorkspaceSplit } from '@/components/workspace/WorkspaceSplit';
+import { PanelInteractionContext, ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { flushSync } from 'react-dom';
 import { createRecordingCapture } from '@/lib/recordingCapture';
 import type { RecordingCapture } from '@/lib/recordingCapture';
@@ -88,15 +90,16 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   const hasGraph = player.graphState.nodes.length > 0;
   const hasVectors = player.vectors.length > 0;
   const visibleStructs = player.structs.filter(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0));
-  const hasStructs = visibleStructs.length > 0 || player.matrices.length > 0;
+  const hasStructs = visibleStructs.length > 0 || player.matrices.length > 0 || player.calls.length > 0;
   const hasVisualization = hasGraph || hasVectors || hasStructs;
   const hasProgramConsole = !!player.programConsole.output || player.programConsole.warnings.length > 0;
 
   return (
-    <>
-      {!hasGraph && player.caption && <div className="frame-caption frame-caption-inline" role="status">{player.caption}</div>}
+    <PanelInteractionContext.Provider value={!staticRender}>
+      {!hasGraph && player.caption && <ResizablePanel title="Descrição do passo"><div className="frame-caption frame-caption-inline" role="status">{player.caption}</div></ResizablePanel>}
       <div className={`graph-stage ${!hasGraph && hasVisualization ? 'graph-stage-data-only' : ''} ${hasVectors && !hasGraph ? 'graph-stage-vector-only' : ''}`}>
         {hasGraph && (
+          <ResizablePanel title="Grafo" className="graph-workspace" fill>
           <div className="graph-panel">
             <GraphCanvas
               ref={graphRef}
@@ -117,8 +120,9 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
             />
             {player.caption && <div className="frame-caption" role="status">{player.caption}</div>}
           </div>
+          </ResizablePanel>
         )}
-        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={player.matrices} primary solo={!hasVectors} />}
+        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={player.matrices} calls={player.calls} primary solo={!hasVectors} />}
         <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />
         {!hasVisualization && hasProgramConsole && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
         {!hasVisualization && !hasProgramConsole && (
@@ -139,15 +143,15 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
             </div>
           </div>
         )}
-        {hasGraph && <GraphLegend />}
+        {hasGraph && <ResizablePanel title="Legenda"><GraphLegend /></ResizablePanel>}
       </div>
       {!staticRender && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
-      {hasGraph && <StructsPanel structs={player.structs} matrices={player.matrices} />}
+      {hasGraph && <StructsPanel structs={player.structs} matrices={player.matrices} calls={player.calls} />}
       {hasVisualization && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
-    </>
+    </PanelInteractionContext.Provider>
   );
 }, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
-  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
+  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
   const [code, setCode] = useState(DEFAULT_CPP_CODE);
@@ -227,7 +231,7 @@ export default function Home() {
 
   const hasGraph = player.graphState.nodes.length > 0;
   const hasVectors = player.vectors.length > 0;
-  const hasStructs = player.structs.some(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0)) || player.matrices.length > 0;
+  const hasStructs = player.structs.some(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0)) || player.matrices.length > 0 || player.calls.length > 0;
   const hasVisualization = hasGraph || hasVectors || hasStructs;
 
   const playbackCompleted = player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1;
@@ -511,10 +515,9 @@ export default function Home() {
         <div className="run-state"><Activity className="h-3.5 w-3.5" /> {isLoading ? 'executando' : 'pronto para executar'}</div>
       </section>
 
-      <section className="workspace-grid">
+      <WorkspaceSplit>
         <div className="editor-column">
           <div className="editor-header">
-            <div className="panel-label"><Code2 className="h-3.5 w-3.5" /> código-fonte</div>
             <div className="editor-tabs" role="tablist" aria-label="Fonte do código">
               <button
                 className={`editor-tab ${editorTab === 'custom' ? 'editor-tab-active' : ''}`}
@@ -617,8 +620,8 @@ export default function Home() {
               activeLine={player.line}
             />
           </div>
-          <details className="stdin-panel">
-            <summary>entrada (stdin)</summary>
+          <ResizablePanel title="Entrada (stdin)" defaultCollapsed className="stdin-workspace">
+          <div className="stdin-panel">
             <textarea
               value={stdin}
               onChange={(e) => setStdin(e.target.value)}
@@ -626,7 +629,8 @@ export default function Home() {
               placeholder="Dados lidos por cin..."
               aria-label="Entrada padrão do programa"
             />
-          </details>
+          </div>
+          </ResizablePanel>
         </div>
 
         <div
@@ -635,7 +639,6 @@ export default function Home() {
           className={`visualizer-column ${fullscreen ? 'visualizer-fullscreen' : ''} ${isRecording ? 'visualizer-recording' : ''}`}
         >
           <div className="visualizer-header">
-            <div className="panel-label"><Network className="h-3.5 w-3.5" /> visualização</div>
             {traceMode === 'automatic' && <span className="text-xs text-slate-400">automática</span>}
             <GraphToolbar
               layout={layout}
@@ -678,6 +681,7 @@ export default function Home() {
             />
           </div>
 
+          <ResizablePanel title="Linha do tempo">
           <TimelineControls
             disabled={isRecording}
             currentStep={player.currentStepIndex}
@@ -690,9 +694,10 @@ export default function Home() {
             onSeek={player.seek}
             onSpeedChange={player.setSpeed}
           />
+          </ResizablePanel>
           {svgSnapshot && <SvgExportDialog snapshot={svgSnapshot} options={svgOptions} onOptionsChange={setSvgOptions} filename={`runspect-grafo-passo-${player.currentStepIndex + 1}.svg`} onClose={() => setSvgSnapshot(null)} />}
         </div>
-      </section>
+      </WorkspaceSplit>
 
       <footer className="workspace-footer">
         <span><Clock3 className="h-3.5 w-3.5" /> passo {player.totalSteps ? player.currentStepIndex + 1 : 0} de {player.totalSteps}</span>

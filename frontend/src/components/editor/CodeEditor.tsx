@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { Settings2 } from 'lucide-react';
+import { ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { useEditorSettings } from '@/hooks/useEditorSettings';
 import { ConfiguredMonacoEditor } from './ConfiguredMonacoEditor';
 
@@ -84,7 +85,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   }, [logs.length, output]);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full w-full bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+    <div className="flex flex-col flex-1 min-h-0 h-full w-full bg-slate-900 border border-slate-800 rounded-xl overflow-auto shadow-lg">
       <div className="flex items-center justify-between px-4 py-2 bg-slate-950 border-b border-slate-800">
         <span className="text-xs font-mono font-semibold text-slate-400">solution.cpp</span>
         <div className="flex items-center gap-2">
@@ -99,7 +100,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           </button>
         </div>
       </div>
-      <div className="flex-1 min-h-0">
+      <ResizablePanel title="Editor" className="editor-workspace" fill minHeight={100}>
+      <div className="monaco-panel-content">
         <ConfiguredMonacoEditor
           settings={settings}
           height="100%"
@@ -109,7 +111,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           onMount={handleEditorMount}
         />
       </div>
+      </ResizablePanel>
       {output && (
+        <ResizablePanel title="Terminal" className="terminal-workspace" minHeight={40}>
         <section className={`terminal-panel ${hasError ? 'terminal-panel-error' : ''}`} aria-label="Saída do terminal">
           <div className="terminal-header">
             <div className="traffic-lights" aria-hidden="true"><i /><i /><i /></div>
@@ -121,6 +125,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             {logs.length > 0 && '\n' + logs.map((line) => `> ${line}`).join('\n')}
           </pre>
         </section>
+        </ResizablePanel>
       )}
       {showSettings && <EditorSettingsDialog settings={settings} status={status} onChange={updateSettings} onReset={resetSettings} onClose={() => setShowSettings(false)} />}
     </div>
