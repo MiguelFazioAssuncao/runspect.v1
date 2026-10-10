@@ -49,3 +49,18 @@ func TestRunHandlerRejectsGet(t *testing.T) {
 		t.Fatalf("status = %d, Allow = %q", rec.Code, rec.Header().Get("Allow"))
 	}
 }
+
+func TestAnalyzeHandlerRejectsInvalidRequests(t *testing.T) {
+	for _, body := range []string{`{`, `{}`, `{"code":" "}`, `{"code":"int main() {}"} {}`} {
+		rec := httptest.NewRecorder()
+		analyzeHandler(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/analyze", strings.NewReader(body)))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d for %s", rec.Code, body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	analyzeHandler(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/analyze", nil))
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("status=%d Allow=%q", rec.Code, rec.Header().Get("Allow"))
+	}
+}

@@ -1,3 +1,4 @@
+import { confirmAllVisualizations, mockVisualizationAnalysis } from './browser-selection.mjs';
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/structures-browser.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -72,6 +73,7 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/healthz', route => route.fulfill({ json: { status: 'ok' } }));
+  await mockVisualizationAnalysis(page, () => [...results.values()].flatMap(result => result.steps));
   await page.route('**/api/run', route => {
     const result = results.get(route.request().postDataJSON().code);
     assert.ok(result, 'The selected example must be submitted to the backend');
@@ -85,7 +87,7 @@ try {
     await page.setViewportSize({ width, height: 960 });
     for (const id of ids) {
       await page.getByLabel('Selecionar técnica de programação competitiva').selectOption(id);
-      await page.getByRole('button', { name: 'Executar Algoritmo' }).click();
+      await page.getByRole('button', { name: 'Executar Algoritmo' }).click(); await confirmAllVisualizations(page);
       await page.locator(`${primary} .variable-value`).first().waitFor();
       assert.ok((await page.locator(primary).boundingBox()).height > 100, 'The data panel must occupy the primary visualization area');
       const slider = page.getByLabel('Posição na linha do tempo');

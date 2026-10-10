@@ -82,6 +82,11 @@ class Instrumenter:
         self.warnings = set()
         self.functions = []
         self.globals = {}
+        self.variable_types = {}
+        self.observed = set()
+        self.reachable = set()
+        self.current_reachable = False
+        self.available = set()
 
     def own(self, node):
         return node.location.file and str(node.location.file) == self.path
@@ -143,7 +148,120 @@ class Instrumenter:
         if not standard and typ.kind == self.ci.TypeKind.RECORD:
             self.warnings.add("Objetos personalizados e ponteiros não são expandidos automaticamente.")
             return None
+        self.variable_types[node.get_usr()] = typ
         return (name, node.get_usr(), node.location.line, ready)
+
+    def type_name(self, typ):
+        return re.sub(r"^(?:(?:const|volatile)\s+)+", "", typ.get_canonical().spelling).replace(" ", "")
+
+    def sequence_item(self, typ):
+        typ = typ.get_canonical()
+        if typ.kind == self.ci.TypeKind.CONSTANTARRAY:
+            return typ.get_array_element_type().get_canonical()
+        spelling = self.type_name(typ)
+        if any(spelling.startswith("std::" + name + "<") for name in (
+            "vector", "array", "deque", "list", "set", "multiset", "unordered_set", "unordered_multiset", "basic_string",
+        )):
+            return typ.get_template_argument_type(0).get_canonical()
+        return None
+
+    def numeric(self, typ):
+        return typ.get_canonical().kind in {
+            self.ci.TypeKind.BOOL, self.ci.TypeKind.CHAR_U, self.ci.TypeKind.UCHAR,
+            self.ci.TypeKind.CHAR16, self.ci.TypeKind.CHAR32, self.ci.TypeKind.USHORT,
+            self.ci.TypeKind.UINT, self.ci.TypeKind.ULONG, self.ci.TypeKind.ULONGLONG,
+            self.ci.TypeKind.UINT128, self.ci.TypeKind.CHAR_S, self.ci.TypeKind.SCHAR,
+            self.ci.TypeKind.WCHAR, self.ci.TypeKind.SHORT, self.ci.TypeKind.INT,
+            self.ci.TypeKind.LONG, self.ci.TypeKind.LONGLONG, self.ci.TypeKind.INT128,
+            self.ci.TypeKind.FLOAT, self.ci.TypeKind.DOUBLE, self.ci.TypeKind.LONGDOUBLE,
+        }
+
+    def safe_item(self, typ):
+        typ = typ.get_canonical()
+        if typ.kind in (self.ci.TypeKind.LVALUEREFERENCE, self.ci.TypeKind.RVALUEREFERENCE):
+            typ = typ.get_pointee().get_canonical()
+        spelling = self.type_name(typ)
+        if self.numeric(typ) or typ.kind == self.ci.TypeKind.ENUM or spelling == "std::basic_string<char>" or spelling.startswith("std::basic_string<char,"):
+            return True
+        if spelling.startswith("std::pair<"):
+            return all(self.safe_item(typ.get_template_argument_type(i)) for i in (0, 1))
+        return False
+
+    def observed_capability(self, usr):
+        typ = self.variable_types[usr]
+        spelling = self.type_name(typ)
+        item = self.sequence_item(typ)
+        if usr in self.graphs and item is not None:
+            if self.sequence_item(item) is not None:
+                return "graph"
+            if self.type_name(item).startswith("std::pair<"):
+                args = [item.get_template_argument_type(i).get_canonical() for i in (0, 1)]
+                if all(self.numeric(arg) and arg.kind not in (self.ci.TypeKind.FLOAT, self.ci.TypeKind.DOUBLE, self.ci.TypeKind.LONGDOUBLE) for arg in args):
+                    return "graph"
+                return None
+        if self.numeric(typ) or typ.kind == self.ci.TypeKind.ENUM:
+            return "structures"
+        if item is not None:
+            if self.numeric(item):
+                return "vectors"
+            cell = self.sequence_item(item)
+            if cell is not None:
+                return "matrices" if self.numeric(cell) else None
+            if any(self.type_name(item).startswith("std::" + name + "<") for name in ("pair", "tuple", "optional", "bitset")):
+                return "structures"
+            return None
+        if spelling.startswith("std::bitset<"):
+            return "vectors"
+        if any(spelling.startswith("std::" + name + "<") for name in (
+            "pair", "tuple", "optional", "map", "multimap", "unordered_map", "unordered_multimap", "queue", "stack", "priority_queue",
+        )):
+            if any(spelling.startswith("std::" + name + "<") for name in ("queue", "stack", "priority_queue")):
+                item = typ.get_template_argument_type(0).get_canonical()
+                if not self.safe_item(item):
+                    return None
+            return "structures"
+        return None
+
+    def reachable_functions(self):
+        functions = {function.get_usr(): function for function in self.functions}
+        pending = [usr for usr, function in functions.items() if function.spelling == "main"]
+        while pending:
+            usr = pending.pop()
+            if usr in self.reachable:
+                continue
+            self.reachable.add(usr)
+            for node in self.descendants(functions[usr]):
+                # Function references also cover callback arguments and aliases.
+                if node.referenced and node.referenced.get_usr() in functions:
+                    pending.append(node.referenced.get_usr())
+
+    def source_capabilities(self, manual=False):
+        available = set(self.available) if not manual else set()
+        for function in self.functions:
+            if function.get_usr() not in self.reachable:
+                continue
+            for node in self.descendants(function):
+                if node.kind != self.K.CALL_EXPR or not node.referenced:
+                    continue
+                target = node.referenced
+                parent = target.semantic_parent
+                if manual and parent and parent.kind == self.K.NAMESPACE and parent.spelling == "viz":
+                    if target.spelling in ("add_node", "add_edge"):
+                        available.add("graph")
+                    elif target.spelling in ("vector_init", "vector_result"):
+                        available.add("vectors")
+                    elif target.spelling == "show":
+                        available.add("structures")
+                    elif target.spelling == "show_matrix":
+                        available.add("matrices")
+                refs = [sub for sub in self.descendants(node) if sub.kind == self.K.DECL_REF_EXPR and sub.referenced]
+                if node.spelling == "operator<<" and any(sub.spelling in ("cout", "wcout") and sub.referenced.semantic_parent and sub.referenced.semantic_parent.spelling == "std" for sub in refs):
+                    available.add("output")
+                if not self.own(target) and target.spelling in ("printf", "puts", "putchar", "wprintf", "putwchar"):
+                    available.add("output")
+                if not self.own(target) and target.spelling in ("fprintf", "fputs", "fputc", "fwrite") and any(sub.spelling == "stdout" for sub in refs):
+                    available.add("output")
+        return sorted(available)
 
     def collect(self, node, globals_allowed=True):
         for child in self.children(node):
@@ -227,6 +345,8 @@ class Instrumenter:
             display = self.aliases.get(usr, name)
             if display != name and display in scope and scope[display][1] == self.alias_targets[usr]:
                 continue
+            if self.current_reachable:
+                self.observed.add(usr)
             method = "graph" if usr in self.graphs else "observe"
             sorting = ",true" if method == "observe" and usr in self.sorting_vectors else ""
             call = f"{frame}.{method}({json.dumps(display, ensure_ascii=True)},{name}{sorting});"
@@ -591,6 +711,8 @@ class Instrumenter:
         self.insert(self.end(node), self.initialize_written(node, scope) + self.snapshot_write(node, scope) + self.frame(scope, node.location.line, defer_graph=defer_graph) + self.match_written(node, scope))
 
     def call_guard(self, body, name, parameters):
+        if self.current_reachable and name != "main":
+            self.available.add("calls")
         self.serial += 1
         guard = self.prefix + "call_" + str(self.serial)
         locals = []
@@ -604,11 +726,13 @@ class Instrumenter:
 
     def run(self):
         self.collect(self.unit.cursor)
+        self.reachable_functions()
         for function in self.functions:
             self.inspect_patterns(function)
         self.sorting_vectors.intersection_update(self.mutated)
         self.aliases = {usr: name for usr, name in self.aliases.items() if usr not in self.mutated and self.alias_targets[usr] not in self.mutated}
         for function in self.functions:
+            self.current_reachable = function.get_usr() in self.reachable
             bodies = [c for c in self.children(function) if c.kind == self.K.COMPOUND_STMT]
             boundary = bodies[0].extent.start.offset if bodies else function.extent.end.offset
             tokens = [t.spelling for t in function.get_tokens() if t.extent.start.offset < boundary]
@@ -626,6 +750,10 @@ class Instrumenter:
                         self.insert(body.extent.start.offset + 1, "::runspect_auto::start(); ::runspect_auto::Completion " + self.prefix + "completion;")
                     self.call_guard(body,function.spelling,function.get_arguments() or [])
                     self.block(body, scope, entry=True)
+        for usr in self.observed:
+            capability = self.observed_capability(usr)
+            if capability:
+                self.available.add(capability)
         # Multiple insertions at the same position must preserve discovery order.
         output = bytearray(self.source)
         for _, (start, end, text) in sorted(enumerate(self.edits), key=lambda item: (item[1][0], item[1][1] > item[1][0], item[0]), reverse=True):
@@ -638,6 +766,7 @@ def main():
     parser.add_argument("source")
     parser.add_argument("--runtime", default="")
     parser.add_argument("--cache", default="")
+    parser.add_argument("--analyze-only", action="store_true")
     args = parser.parse_args()
     try:
         ci, resources = load_clang(args.runtime)
@@ -663,14 +792,17 @@ def main():
             if sub.kind == ci.CursorKind.CALL_EXPR and sub.referenced:
                 parent = sub.referenced.semantic_parent
                 if parent and parent.kind == ci.CursorKind.NAMESPACE and parent.spelling == "viz":
-                    print(json.dumps({"mode": "manual"}))
+                    tool.collect(unit.cursor)
+                    tool.reachable_functions()
+                    print(json.dumps({"mode": "manual", "capabilities": tool.source_capabilities(manual=True)}))
                     return 0
     output = tool.run()
     # GCC cannot load a PCH from inside another header. Keep this include at
     # translation-unit level, before the instrumentation header and C++ tokens.
     prefix = b'#include <bits/stdc++.h>\n' if stdlib_first(source) else b''
-    Path(path).write_bytes(prefix + b'#include "automatic.h"\n#line 1 "solution.cpp"\n' + output)
-    print(json.dumps({"mode": "automatic", "warnings": sorted(tool.warnings)}))
+    if not args.analyze_only:
+        Path(path).write_bytes(prefix + b'#include "automatic.h"\n#line 1 "solution.cpp"\n' + output)
+    print(json.dumps({"mode": "automatic", "warnings": sorted(tool.warnings), "capabilities": tool.source_capabilities()}))
     return 0
 
 

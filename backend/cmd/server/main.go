@@ -64,6 +64,14 @@ func resolveHeaderPath() string {
 }
 
 func runHandler(cppRunner *runner.CppRunner) http.HandlerFunc {
+	return codeHandler(cppRunner, false)
+}
+
+func analyzeHandler(cppRunner *runner.CppRunner) http.HandlerFunc {
+	return codeHandler(cppRunner, true)
+}
+
+func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -91,6 +99,17 @@ func runHandler(cppRunner *runner.CppRunner) http.HandlerFunc {
 			return
 		}
 
+		w.Header().Set("Content-Type", "application/json")
+		if analyze {
+			res := cppRunner.Analyze(r.Context(), req.Code)
+			if !res.Success {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+			}
+			if err := json.NewEncoder(w).Encode(res); err != nil {
+				log.Printf("falha ao escrever análise: %v", err)
+			}
+			return
+		}
 		res := cppRunner.Run(req.Code, req.Stdin)
 		status := http.StatusOK
 		if !res.Success {
@@ -123,6 +142,7 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/api/run", runHandler(cppRunner))
+	mux.HandleFunc("/api/analyze", analyzeHandler(cppRunner))
 
 	origins := strings.Split(
 		envString("RUNSPECT_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"),
