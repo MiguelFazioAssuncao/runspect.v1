@@ -15,6 +15,33 @@ type ExecutionResult struct {
 	TraceMode     string            `json:"trace_mode,omitempty"`
 	TraceWarnings []string          `json:"trace_warnings,omitempty"`
 	Metrics       *ExecutionMetrics `json:"metrics,omitempty"`
+	TraceLimits   *TraceOptions     `json:"trace_limits,omitempty"`
+}
+
+// Limits control observation only; execution keeps its CPU/memory/output caps.
+type TraceOptions struct {
+	MaxSteps int `json:"max_steps"`
+	MaxItems int `json:"max_items"`
+}
+
+func (options TraceOptions) Valid() bool {
+	return options.MaxSteps >= 0 && options.MaxSteps <= 10000 && options.MaxItems >= 0 && options.MaxItems <= 2048
+}
+
+func (options TraceOptions) Normalized() TraceOptions {
+	if options.MaxSteps <= 0 {
+		options.MaxSteps = 2000
+	}
+	if options.MaxItems <= 0 {
+		options.MaxItems = 256
+	}
+	if options.MaxSteps > 10000 {
+		options.MaxSteps = 10000
+	}
+	if options.MaxItems > 2048 {
+		options.MaxItems = 2048
+	}
+	return options
 }
 
 // Timings use fractional milliseconds so cached executions remain measurable.

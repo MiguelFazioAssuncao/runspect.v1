@@ -27,8 +27,9 @@ const maxStdinBytes = 64 * 1024
 var performanceLog = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 type CodeRequest struct {
-	Code  string `json:"code"`
-	Stdin string `json:"stdin"`
+	Code         string              `json:"code"`
+	Stdin        string              `json:"stdin"`
+	TraceOptions domain.TraceOptions `json:"trace_options"`
 }
 
 func envString(key, fallback string) string {
@@ -158,6 +159,10 @@ func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 			handler.WriteError(w, http.StatusBadRequest, "A entrada (stdin) excede 64 KiB")
 			return
 		}
+		if !req.TraceOptions.Valid() {
+			handler.WriteError(w, http.StatusBadRequest, "trace_options permite até 10000 passos e 2048 elementos; os limites devem ser não negativos")
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if analyze {
@@ -171,7 +176,7 @@ func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 			}
 			return
 		}
-		res := cppRunner.Run(req.Code, req.Stdin)
+		res := cppRunner.RunWithOptions(req.Code, req.Stdin, req.TraceOptions)
 		performanceLog.Info("cpp_run", "success", res.Success, "trace_mode", res.TraceMode, "metrics", res.Metrics)
 		status := http.StatusOK
 		if !res.Success {

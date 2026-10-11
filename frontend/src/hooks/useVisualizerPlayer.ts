@@ -134,6 +134,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     structs: traceState.structs,
     matrices: traceState.matrices,
     calls: traceState.calls,
+    references: traceState.references,
     reads: traceState.reads,
     writes: traceState.writes,
     vectorMeta: traceState.vectorMeta,

@@ -248,6 +248,7 @@ export function createVectorReplay(steps: TraceStep[]) {
       if (!step.step_event.startsWith('VECTOR_') || step.step_event === 'VECTOR_META') continue;
       const reason = applyEvent(vectors, step);
       if (reason) issues.push({ event: i, step_event: step.step_event, reason });
+      else if (step.step_event === 'VECTOR_INIT') activeScope?.add(String(step.data?.name));
     }
 
     const snapshots: VectorSnapshot[] = Array.from(vectors, ([name, vector]) => ({

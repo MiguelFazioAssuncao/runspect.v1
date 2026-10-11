@@ -37,6 +37,8 @@ import { boundedOperation, createRecordingPlan, recordVisualization, RecordingSt
 import type { RecordingPlan, RecordingStatus } from '@/lib/recording';
 import { captureFontCSS } from '@/lib/captureFonts';
 import type { ExecutionResult, TraceStep } from '@/types/visualizer';
+import { TRACE_PRESETS } from '@/lib/traceLimits';
+import type { TracePreset } from '@/lib/traceLimits';
 
 type PlayerState = ReturnType<typeof useVisualizerPlayer>;
 const NO_STEPS: TraceStep[] = [];
@@ -96,7 +98,7 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   }, [player.logs]);
 
   const consoleOutput = player.programConsole.output || (player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1 ? fallbackOutput : '');
-  const { hasGraph, hasVectors, hasStructs, hasVisualization, hasConsole, hasAnalysis, hasContent, structs: visibleStructs, matrices, calls } = selectVisualizationContent({ ...player, programConsole: { ...player.programConsole, output: consoleOutput } }, selection);
+  const { hasGraph, hasVectors, hasStructs, hasVisualization, hasConsole, hasAnalysis, hasContent, structs: visibleStructs, matrices, calls, references } = selectVisualizationContent({ ...player, programConsole: { ...player.programConsole, output: consoleOutput } }, selection);
   const hasSelection = Object.values(selection).some(Boolean);
 
   return (
@@ -127,7 +129,7 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
           </div>
           </ResizablePanel>
         )}
-        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} primary solo={!hasVectors} />}
+        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} references={references} primary solo={!hasVectors} />}
         {hasVectors && <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />}
         {hasConsole && <ProgramConsole output={consoleOutput} warnings={player.programConsole.warnings} />}
         {!hasContent && (
@@ -156,17 +158,18 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
         {hasGraph && selection.legend && <ResizablePanel title="Legenda"><GraphLegend /></ResizablePanel>}
         {hasAnalysis && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
       </div>
-      {hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} />}
+      {hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} references={references} />}
     </PanelInteractionContext.Provider>
   );
 }, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.selection === next.selection && previous.fallbackOutput === next.fallbackOutput && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
   (!next.fallbackOutput || (previous.player.currentStepIndex === next.player.currentStepIndex && previous.player.totalSteps === next.player.totalSteps)) &&
-  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
+  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'references', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
   const [code, setCode] = useState(DEFAULT_CPP_CODE);
   const [customCode, setCustomCode] = useState(DEFAULT_CPP_CODE);
   const [stdin, setStdin] = useState(examples[0].stdin ?? '');
+  const [tracePreset, setTracePreset] = useState<TracePreset>('standard');
   const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
   const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
   const [exampleQuery, setExampleQuery] = useState('');
@@ -444,7 +447,7 @@ export default function Home() {
       const response = await fetch(runspectApiUrl('/api/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: source, stdin: input }),
+        body: JSON.stringify({ code: source, stdin: input, trace_options: { max_steps: TRACE_PRESETS[tracePreset].max_steps, max_items: TRACE_PRESETS[tracePreset].max_items } }),
       });
       const responseText = await response.text();
       let result: Partial<ExecutionResult> & { error?: string };
@@ -652,6 +655,7 @@ export default function Home() {
             />
           </div>
           </ResizablePanel>
+          <div className="trace-capture-settings"><label htmlFor="trace-capture-limit">Captura da visualização</label><select id="trace-capture-limit" value={tracePreset} disabled={isLoading || isRecording} onChange={event => setTracePreset(event.target.value as TracePreset)}>{Object.entries(TRACE_PRESETS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select><small>Capturas maiores podem levar mais tempo.</small></div>
         </div>
 
         <div

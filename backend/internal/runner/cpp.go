@@ -136,7 +136,7 @@ func (r *CppRunner) runLimits() []string {
 	}
 }
 
-func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string) []string {
+func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string, environment ...string) []string {
 	if !r.Sandbox {
 		if _, err := exec.LookPath("prlimit"); err != nil {
 			return argv
@@ -172,6 +172,12 @@ func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string) []stri
 		}
 	} else {
 		args = append(args, "--ro-bind", dir, "/work")
+	}
+	for _, entry := range environment {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			args = append(args, "--setenv", parts[0], parts[1])
+		}
 	}
 	args = append(args,
 		"--chdir", "/work",
@@ -268,16 +274,20 @@ func describeExit(err error, stderr string) string {
 	return fmt.Sprintf("Erro em tempo de execução: %s\n%s", reason, message)
 }
 
-func (r *CppRunner) execute(dir, stdin string, automatic bool, metrics *domain.ExecutionMetrics) domain.ExecutionResult {
+func (r *CppRunner) execute(dir, stdin string, automatic bool, metrics *domain.ExecutionMetrics, options domain.TraceOptions) domain.ExecutionResult {
 	start := time.Now()
 	defer func() { metrics.ExecuteMs += elapsedMs(start) }()
 	ctx, cancel := context.WithTimeout(context.Background(), r.RunTimeout)
 	defer cancel()
 
 	base := r.baseDir(dir)
-	argv := r.wrap(dir, false, r.runLimits(), []string{base + "/solution"})
+	environment := []string{"RUNSPECT_TRACE_MAX_STEPS=" + strconv.Itoa(options.MaxSteps), "RUNSPECT_TRACE_MAX_ITEMS=" + strconv.Itoa(options.MaxItems)}
+	argv := r.wrap(dir, false, r.runLimits(), []string{base + "/solution"}, environment...)
 
 	cmd := r.command(ctx, dir, argv)
+	if !r.Sandbox {
+		cmd.Env = append(cmd.Env, environment...)
+	}
 	cmd.Stdin = strings.NewReader(stdin)
 	stderr := &limitedBuffer{max: r.MaxStderrBytes}
 	cmd.Stderr = stderr
@@ -463,7 +473,12 @@ func finishExecution(result domain.ExecutionResult, trace instrumentation) domai
 	return result
 }
 
-func (r *CppRunner) Run(code, stdin string) (result domain.ExecutionResult) {
+func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
+	return r.RunWithOptions(code, stdin, domain.TraceOptions{})
+}
+
+func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptions) (result domain.ExecutionResult) {
+	options = options.Normalized()
 	start := time.Now()
 	metrics := &domain.ExecutionMetrics{CompileResourcesComplete: true}
 	prepared := false
@@ -476,6 +491,9 @@ func (r *CppRunner) Run(code, stdin string) (result domain.ExecutionResult) {
 		metrics.CacheEntries, metrics.CacheBytes, metrics.CacheEvictions = r.cache.stats()
 		result.TimeMs = int64(metrics.TotalMs)
 		result.Metrics = metrics
+		if result.TraceMode == "automatic" {
+			result.TraceLimits = &options
+		}
 		if !result.Success {
 			metrics.FailedStage = stage
 		}
@@ -510,7 +528,7 @@ func (r *CppRunner) Run(code, stdin string) (result domain.ExecutionResult) {
 			return fail("Falha ao preparar binário em cache")
 		}
 		stage = "execute"
-		result := r.execute(tmpDir, stdin, cached.trace.Mode != "manual", metrics)
+		result := r.execute(tmpDir, stdin, cached.trace.Mode != "manual", metrics, options)
 		return finishExecution(result, cached.trace)
 	}
 	analysisStart := time.Now()
@@ -561,6 +579,6 @@ func (r *CppRunner) Run(code, stdin string) (result domain.ExecutionResult) {
 		}
 	}
 	stage = "execute"
-	result = r.execute(tmpDir, stdin, trace.Mode != "manual", metrics)
+	result = r.execute(tmpDir, stdin, trace.Mode != "manual", metrics, options)
 	return finishExecution(result, trace)
 }

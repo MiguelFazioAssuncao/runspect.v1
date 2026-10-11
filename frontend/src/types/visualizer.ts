@@ -40,6 +40,7 @@ export interface ExecutionResult {
   time_ms: number;
   trace_mode?: 'automatic' | 'manual' | 'unavailable';
   trace_warnings?: string[];
+  trace_limits?: { max_steps: number; max_items: number };
 }
 
 export interface GraphNode extends d3.SimulationNodeDatum {

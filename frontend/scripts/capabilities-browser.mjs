@@ -135,7 +135,7 @@ try {
     ['#include <iostream>\nint main(){ std::cout << "hello"; }', ['Saída do programa']],
     ['int recur(int n){return n?recur(n-1):0;} int main(){return recur(2);}', ['Variáveis e estruturas', 'Chamadas de funções']],
     ['#include <vector>\n#include <iostream>\nvoid unused(){ std::vector<std::vector<int>> graph(2); graph[0].push_back(1); } int main(){std::cout << "hello";}', ['Saída do programa']],
-    ['#include <vector>\nstruct Data{int value;}; int main(){std::vector<Data> objects;}', []],
+    ['#include <vector>\nstruct Data{int value;}; int main(){std::vector<Data> objects;}', ['Variáveis e estruturas', 'Objetos e ponteiros']],
     ['#include <vector>\n#define DATA std::vector<int>\nint main(){DATA values{1,2};}', ['Vetores']],
   ]) {
     await inspect(code, expected);

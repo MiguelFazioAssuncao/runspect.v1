@@ -6,6 +6,8 @@ const isUserVisualization = (step: TraceStep): boolean => {
       return typeof step.data?.name === 'string' && Array.isArray(step.data.values);
     case 'ADD_NODE':
       return typeof step.data?.id === 'number' && Number.isFinite(step.data.id);
+    case 'SET_REFERENCES':
+      return (Array.isArray(step.data?.objects) && step.data.objects.length > 0) || (Array.isArray(step.data?.roots) && step.data.roots.length > 0);
     case 'SET_MATRIX':
       return typeof step.data?.name === 'string' && Array.isArray(step.data.rows);
     case 'SET_STRUCT':

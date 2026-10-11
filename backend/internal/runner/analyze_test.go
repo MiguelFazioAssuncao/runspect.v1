@@ -23,8 +23,8 @@ using Data = std::vector<int>;
 int main() { Data g{3,1,2}; std::sort(g.begin(),g.end()); }`, []string{"vectors"}},
 		{"const containers", `#include <vector>
 int main() { const std::vector<int> values{1,2}; }`, []string{"vectors"}},
-		{"unsupported adapter items", `#include <queue>
-struct Data { int value; }; int main() { std::queue<std::pair<int,Data>> tasks; }`, []string{}},
+		{"record adapter items", `#include <queue>
+struct Data { int value; }; int main() { std::queue<std::pair<int,Data>> tasks; }`, []string{"structures"}},
 		{"matrix aliases", `#include <array>
 using Row = std::array<int,2>; using Table = std::array<Row,2>;
 int main() { Table dp{{Row{{0,1}},Row{{1,2}}}}; }`, []string{"matrices"}},
@@ -49,9 +49,13 @@ int main() { display::vector_init("values",std::vector<int>{1,2}); }`, []string{
 		{"comments and strings", `int main() {
 // viz::add_node(1); std::vector<std::vector<int>> graph;
 const char* text = R"tag(viz::add_node(1); std::vector<int> v;)tag";
-}`, []string{}},
-		{"unsupported objects", `#include <vector>
-struct Data { int value; }; int main() { std::vector<Data> objects; }`, []string{}},
+}`, []string{"references", "structures"}},
+		{"record objects", `#include <vector>
+struct Data { int value; }; int main() { std::vector<Data> objects; }`, []string{"references", "structures"}},
+		{"private objects remain opaque", `#include <vector>
+class Data { int value; }; int main() { std::vector<Data> objects; }`, []string{}},
+		{"constexpr runtime calls", `constexpr int twice(int n) { return n*2; }
+static_assert(twice(2)==4); int main() { int value=twice(3); }`, []string{"calls", "structures"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
