@@ -209,6 +209,10 @@ int main() { constexpr auto next = [](int x) { return x+1; }; constexpr int n = 
 	if !res.Success || res.TraceMode != "unavailable" || res.Output != "4" || len(res.TraceWarnings) == 0 {
 		t.Fatalf("mode=%s output=%q error=%s warnings=%v", res.TraceMode, res.Output, res.Errors, res.TraceWarnings)
 	}
+	m := assertMeasured(t, res)
+	if !m.Fallback || m.CompileAttempts != 2 || m.FallbackCompileMs <= 0 || m.FallbackCompileMs >= m.CompileMs {
+		t.Fatalf("fallback compilation not measured separately: %+v", m)
+	}
 }
 
 func TestAutomaticLimitDoesNotStopTheAlgorithm(t *testing.T) {

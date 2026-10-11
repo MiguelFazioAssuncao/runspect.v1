@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,11 +17,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/MiguelFazioAssuncao/runspect.v1/internal/domain"
 	"github.com/MiguelFazioAssuncao/runspect.v1/internal/handler"
 	"github.com/MiguelFazioAssuncao/runspect.v1/internal/runner"
 )
 
 const maxStdinBytes = 64 * 1024
+
+var performanceLog = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 type CodeRequest struct {
 	Code  string `json:"code"`
@@ -40,6 +45,61 @@ func envInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+// Zero disables optional caches; negative or malformed values use the default.
+func envCacheLimit(key string, fallback int) int {
+	if value := os.Getenv(key); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func serverTiming(metrics *domain.ExecutionMetrics) string {
+	return fmt.Sprintf("prepare;dur=%.3f, analysis;dur=%.3f, compile;dur=%.3f, execute;dur=%.3f", metrics.PrepareMs, metrics.AnalysisMs, metrics.CompileMs, metrics.ExecuteMs)
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// Record overload and rate-limit rejections as well as accepted requests.
+// Only the two fixed API paths are logged; query strings and bodies stay out.
+func requestMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/run" && r.URL.Path != "/api/analyze" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		observed := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(observed, r)
+		status := observed.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		performanceLog.Info("cpp_request", "endpoint", r.URL.Path, "status", status, "duration_ms", float64(time.Since(start))/float64(time.Millisecond))
+	})
 }
 
 func serverAddress() string {
@@ -102,6 +162,7 @@ func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if analyze {
 			res := cppRunner.Analyze(r.Context(), req.Code)
+			performanceLog.Info("cpp_analysis", "success", res.Success, "time_ms", res.TimeMs, "cache_hit", res.CacheHit)
 			if !res.Success {
 				w.WriteHeader(http.StatusUnprocessableEntity)
 			}
@@ -111,12 +172,14 @@ func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 			return
 		}
 		res := cppRunner.Run(req.Code, req.Stdin)
+		performanceLog.Info("cpp_run", "success", res.Success, "trace_mode", res.TraceMode, "metrics", res.Metrics)
 		status := http.StatusOK
 		if !res.Success {
 			status = http.StatusUnprocessableEntity
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Server-Timing", serverTiming(res.Metrics))
 		w.WriteHeader(status)
 		if err := json.NewEncoder(w).Encode(res); err != nil {
 			log.Printf("falha ao escrever resposta: %v", err)
@@ -128,6 +191,10 @@ func main() {
 	cppRunner := runner.NewCppRunner(resolveHeaderPath())
 	cppRunner.CompileTimeout = time.Duration(envInt("RUNSPECT_COMPILE_TIMEOUT_SEC", 10)) * time.Second
 	cppRunner.AnalysisTimeout = time.Duration(envInt("RUNSPECT_ANALYSIS_TIMEOUT_SEC", 30)) * time.Second
+	cppRunner.CacheMaxBytes = envCacheLimit("RUNSPECT_BINARY_CACHE_MB", cppRunner.CacheMaxBytes>>20) << 20
+	cppRunner.CacheMaxEntries = envCacheLimit("RUNSPECT_BINARY_CACHE_ENTRIES", cppRunner.CacheMaxEntries)
+	cppRunner.AnalysisCacheMaxEntries = envCacheLimit("RUNSPECT_ANALYSIS_CACHE_ENTRIES", cppRunner.AnalysisCacheMaxEntries)
+	cppRunner.CompileMemoryBytes = uint64(envInt("RUNSPECT_COMPILE_MEMORY_MB", int(cppRunner.CompileMemoryBytes>>20))) << 20
 
 	if strings.EqualFold(os.Getenv("RUNSPECT_SANDBOX"), "off") {
 		cppRunner.Sandbox = false
@@ -160,7 +227,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              serverAddress(),
-		Handler:           root,
+		Handler:           requestMetrics(root),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      cppRunner.AnalysisTimeout + 2*cppRunner.CompileTimeout + cppRunner.RunTimeout + 5*time.Second,

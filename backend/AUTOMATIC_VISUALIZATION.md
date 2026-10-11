@@ -175,11 +175,21 @@ geração no build, em troca de menos trabalho a cada execução de C++.
 A compilação usa `-O0` para priorizar o tempo de resposta do visualizador.
 Isso reduz o trabalho de otimização do compilador, mas programas pesados
 podem executar mais lentamente; o limite de execução continua em 3 segundos.
-Até 8 binários são reutilizados em um cache em memória limitado a 16 MiB.
+Até 64 binários são reutilizados em um cache em memória limitado a 16 MiB.
 Cada execução usa o stdin atual e os mesmos limites de sandbox. Alterações
 no código, headers e instrumentador invalidam a entrada; indisponibilidade
 temporária da análise não é armazenada. O cache se perde ao reiniciar o
 serviço, sem depender de disco persistente do provedor.
+
+Análises de capacidades bem-sucedidas também usam um LRU de até 64 entradas.
+O resultado da AST de um binário já compilado pode atender `/api/analyze`
+sem executar o programa. Falhas e análises canceladas não são armazenadas;
+as mesmas alterações de código, headers e instrumentador invalidam as entradas.
+
+Os limites são configuráveis por `RUNSPECT_BINARY_CACHE_MB`,
+`RUNSPECT_BINARY_CACHE_ENTRIES` e `RUNSPECT_ANALYSIS_CACHE_ENTRIES`.
+Zero desativa o cache correspondente. O teto de bytes continua valendo
+mesmo com um limite maior de entradas.
 
 `RUNSPECT_ANALYSIS_TIMEOUT_SEC` controla a análise separadamente da
 compilação (`RUNSPECT_COMPILE_TIMEOUT_SEC`). No Docker, ambos permitem
@@ -187,7 +197,13 @@ compilação (`RUNSPECT_COMPILE_TIMEOUT_SEC`). No Docker, ambos permitem
 disputem os recursos do plano gratuito. A compilação de fallback recebe
 um orçamento próprio. O timeout de escrita HTTP cobre todas essas etapas.
 
-`time_ms` mede o processo completo no backend, incluindo análise e
-compilação; não mede apenas o algoritmo e não inclui o tempo de despertar
-um serviço suspenso pelo provedor. Depois destas alterações, faça um novo
-deploy do backend com rebuild da imagem Docker para gerar os PCHs.
+`time_ms` mede o processo completo no backend, inclusive em falhas.
+`metrics` separa preparação, análise, compilação (incluindo fallback) e execução,
+com precisão inferior a um milissegundo. CPU, pico de RSS, tentativas,
+acertos e ocupação do cache ajudam a avaliar o custo no deploy.
+O tempo não inclui o despertar de um serviço suspenso pelo provedor.
+
+O servidor registra métricas JSON sem código nem stdin, e o header
+`Server-Timing` permite inspecionar as etapas no navegador.
+O benchmark da imagem compara PCH e caches sob os mesmos limites do servidor.
+Veja [medição e configuração do deploy](../docs/desempenho-compilacao.md).

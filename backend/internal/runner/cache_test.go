@@ -13,12 +13,12 @@ func TestCompiledCacheEvictsLeastRecentlyUsedWithinLimits(t *testing.T) {
 	var cache compiledCache
 	a, b, c := sha256.Sum256([]byte("a")), sha256.Sum256([]byte("b")), sha256.Sum256([]byte("c"))
 	program := compiledProgram{binary: []byte("1234"), trace: instrumentation{Mode: "automatic"}}
-	cache.put(a, program, 8)
-	cache.put(b, program, 8)
+	cache.put(a, program, 8, 8)
+	cache.put(b, program, 8, 8)
 	if _, ok := cache.get(a, 8); !ok {
 		t.Fatal("missing cached program")
 	}
-	cache.put(c, program, 8)
+	cache.put(c, program, 8, 8)
 	if _, ok := cache.get(b, 8); ok {
 		t.Fatal("did not evict least recently used program")
 	}
@@ -28,11 +28,11 @@ func TestCompiledCacheEvictsLeastRecentlyUsedWithinLimits(t *testing.T) {
 	if cache.bytes != 8 {
 		t.Fatalf("cache bytes = %d", cache.bytes)
 	}
-	cache.put(a, compiledProgram{binary: []byte("12")}, 8)
+	cache.put(a, compiledProgram{binary: []byte("12")}, 8, 8)
 	if cache.bytes != 6 {
 		t.Fatalf("replacement bytes = %d", cache.bytes)
 	}
-	cache.put(b, compiledProgram{binary: make([]byte, 9)}, 8)
+	cache.put(b, compiledProgram{binary: make([]byte, 9)}, 8, 8)
 	if _, ok := cache.get(b, 8); ok {
 		t.Fatal("stored oversized binary")
 	}
@@ -40,7 +40,7 @@ func TestCompiledCacheEvictsLeastRecentlyUsedWithinLimits(t *testing.T) {
 		t.Fatal("disabled cache returned a binary")
 	}
 	for i := 0; i < 10; i++ {
-		cache.put(sha256.Sum256([]byte{byte(i)}), program, 1000)
+		cache.put(sha256.Sum256([]byte{byte(i)}), program, 1000, 8)
 	}
 	if cache.order.Len() != 8 {
 		t.Fatalf("entries = %d", cache.order.Len())
@@ -62,6 +62,31 @@ func TestCompiledCacheKeyIncludesInstrumentation(t *testing.T) {
 	}
 	if before == r.cacheKey("int main() {}", []byte("header")) {
 		t.Fatal("instrumenter did not invalidate cache")
+	}
+}
+
+func TestCompiledCacheRetainsWorkingSetBeyondEightPrograms(t *testing.T) {
+	var cache compiledCache
+	for i := 0; i < 12; i++ {
+		cache.put(sha256.Sum256([]byte{byte(i)}), compiledProgram{binary: []byte("binary")}, 1024, 64)
+	}
+	for i := 0; i < 12; i++ {
+		if _, ok := cache.get(sha256.Sum256([]byte{byte(i)}), 1024); !ok {
+			t.Fatalf("program %d unnecessarily evicted", i)
+		}
+	}
+	entries, bytes, evictions := cache.stats()
+	if entries != 12 || bytes != 72 || evictions != 0 {
+		t.Fatalf("stats = %d/%d/%d", entries, bytes, evictions)
+	}
+	cache.put(sha256.Sum256([]byte("new")), compiledProgram{binary: []byte("binary")}, 1024, 4)
+	entries, _, evictions = cache.stats()
+	if entries != 4 || evictions != 9 {
+		t.Fatalf("entry limit not applied: entries=%d evictions=%d", entries, evictions)
+	}
+	cache.put(sha256.Sum256([]byte("disabled")), compiledProgram{binary: []byte("binary")}, 1024, 0)
+	if _, ok := cache.get(sha256.Sum256([]byte("disabled")), 1024); ok {
+		t.Fatal("stored binary with cache disabled by entry count")
 	}
 }
 
