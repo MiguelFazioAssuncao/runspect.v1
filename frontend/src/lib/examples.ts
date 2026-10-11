@@ -805,4 +805,290 @@ cada
     }
     cout << a << endl;`,
   'Calcula o MDC por divisões sucessivas. Entrada: a e b não negativos. Saída: MDC(a, b); para 0 e 0, retorna 0.', 'O(log min(a, b)), para a,b > 0', 'O(1)', ['gcd', 'mdc', 'euclides', 'divisibilidade'], '6\n'),
+
+  define('linked-list-reversal', 'Lista ligada: reversão de ponteiros', 'Ponteiros', `5
+1 2 3 4 5
+`, `    int n;
+    cin >> n;
+    ListNode* head = nullptr;
+    ListNode* tail = nullptr;
+    for (int i = 0; i < n; i++) {
+        ll value;
+        cin >> value;
+        ListNode* node = new ListNode{value};
+        if (tail) tail->next = node;
+        else head = node;
+        tail = node;
+    }
+    ListNode* previous = nullptr;
+    ListNode* current = head;
+    while (current) {
+        ListNode* next = current->next;
+        current->next = previous;
+        previous = current;
+        current = next;
+    }
+    head = previous;
+    bool first = true;
+    for (ListNode* node = head; node; node = node->next) {
+        if (!first) cout << ' ';
+        first = false;
+        cout << node->value;
+    }
+    cout << endl;
+    while (head) {
+        ListNode* next = head->next;
+        delete head;
+        head = next;
+    }`,
+  'Inverte uma lista simplesmente ligada e libera os nós. Entrada: n ≥ 0 e n valores. Saída: valores na ordem inversa. A visualização acompanha head, next e cada alteração de ligação.', 'O(n)', 'O(n) para os nós; O(1) auxiliar', ['lista ligada', 'ponteiros', 'struct', 'reversão'], '5 4 3 2 1\n',
+  `struct ListNode {
+    ll value = 0;
+    ListNode* next = nullptr;
+};`),
+
+  define('bst-insertion', 'Árvore binária de busca: inserção e percurso', 'Ponteiros', `7
+5 3 7 2 4 6 8
+`, `    int n;
+    cin >> n;
+    SearchNode* root = nullptr;
+    for (int i = 0; i < n; i++) {
+        ll value;
+        cin >> value;
+        root = insertNode(root, value);
+    }
+    vector<ll> ordered;
+    inorder(root, ordered);
+    for (int i = 0; i < (int)ordered.size(); i++) {
+        if (i) cout << ' ';
+        cout << ordered[i];
+    }
+    cout << endl;
+    destroyTree(root);
+    root = nullptr;`,
+  'Insere valores em uma BST, preservando repetidos no ramo direito. Entrada: n ≥ 0 e n valores. Saída: percurso em ordem. Mostra nós, filhos e chamadas recursivas; árvores muito profundas exigem uma versão iterativa.', 'O(nh), h é a altura; O(n²) no pior caso', 'O(n) para os nós; O(h) na pilha', ['bst', 'árvore binária', 'ponteiros', 'recursão'], '2 3 4 5 6 7 8\n',
+  `struct SearchNode {
+    ll value = 0;
+    SearchNode* left = nullptr;
+    SearchNode* right = nullptr;
+};
+
+SearchNode* insertNode(SearchNode* root, ll value) {
+    if (!root) return new SearchNode{value};
+    if (value < root->value) root->left = insertNode(root->left, value);
+    else root->right = insertNode(root->right, value);
+    return root;
+}
+
+void inorder(SearchNode* root, vector<ll>& ordered) {
+    if (!root) return;
+    inorder(root->left, ordered);
+    ordered.push_back(root->value);
+    inorder(root->right, ordered);
+}
+
+void destroyTree(SearchNode* root) {
+    if (!root) return;
+    destroyTree(root->left);
+    destroyTree(root->right);
+    delete root;
+}`),
+
+  define('trie-prefix-count', 'Trie: contagem por prefixo', 'Estruturas', `4
+casa
+casaco
+carro
+bola
+3
+ca
+cas
+bo
+`, `    int n;
+    cin >> n;
+    vector<TrieNode> trie(1);
+    for (int i = 0; i < n; i++) {
+        string word;
+        cin >> word;
+        int node = 0;
+        trie[node].count++;
+        for (char letter : word) {
+            int c = letter - 'a';
+            if (trie[node].children[c] == 0) {
+                int next = (int)trie.size();
+                trie[node].children[c] = next;
+                trie.push_back(TrieNode{});
+            }
+            node = trie[node].children[c];
+            trie[node].count++;
+        }
+    }
+    int q;
+    cin >> q;
+    while (q--) {
+        string prefix;
+        cin >> prefix;
+        int node = 0;
+        bool found = true;
+        for (char letter : prefix) {
+            int next = trie[node].children[letter - 'a'];
+            if (next == 0) { found = false; break; }
+            node = next;
+        }
+        cout << (found ? trie[node].count : 0) << endl;
+    }`,
+  'Conta palavras que começam com cada prefixo, incluindo repetições. Entrada: n palavras e q prefixos, somente letras minúsculas a–z. Saída: uma contagem por prefixo. Usa vetor de structs com campos e array de filhos.', 'O(total de caracteres da entrada e consultas)', 'O(total de caracteres das palavras · 26)', ['trie', 'prefixos', 'struct', 'vector de objetos'], '3\n2\n1\n',
+  `struct TrieNode {
+    array<int, 26> children{};
+    int count = 0;
+};`),
+
+  define('huffman-tree', 'Huffman: árvore de codificação', 'Greedy', `6
+5 9 12 13 16 45
+`, `    int n;
+    cin >> n;
+    priority_queue<HuffmanEntry, vector<HuffmanEntry>, HuffmanCompare> heap;
+    int serial = 0;
+    for (int i = 0; i < n; i++) {
+        ll frequency;
+        cin >> frequency;
+        HuffmanNode* node = new HuffmanNode{frequency};
+        heap.push(HuffmanEntry{frequency, serial++, node});
+    }
+    ll cost = 0;
+    while (heap.size() > 1) {
+        HuffmanEntry left = heap.top(); heap.pop();
+        HuffmanEntry right = heap.top(); heap.pop();
+        ll combined = left.frequency + right.frequency;
+        HuffmanNode* node = new HuffmanNode{combined, left.node, right.node};
+        cost += combined;
+        heap.push(HuffmanEntry{combined, serial++, node});
+    }
+    HuffmanNode* root = heap.empty() ? nullptr : heap.top().node;
+    cout << cost << endl;
+    destroyHuffman(root);
+    root = nullptr;`,
+  'Combina repetidamente as duas menores frequências para construir a árvore de Huffman. Entrada: n ≥ 0 e n frequências não negativas, cuja soma e custo cabem em ll. Saída: custo ponderado mínimo. Mostra heap com comparador personalizado e nós ligados por ponteiros.', 'O(n log n)', 'O(n)', ['huffman', 'heap', 'comparador', 'struct', 'ponteiros'], '224\n',
+  `struct HuffmanNode {
+    ll frequency = 0;
+    HuffmanNode* left = nullptr;
+    HuffmanNode* right = nullptr;
+};
+struct HuffmanEntry {
+    ll frequency = 0;
+    int serial = 0;
+    HuffmanNode* node = nullptr;
+};
+struct HuffmanCompare {
+    bool operator()(const HuffmanEntry& a, const HuffmanEntry& b) const {
+        return tie(a.frequency, a.serial) > tie(b.frequency, b.serial);
+    }
+};
+void destroyHuffman(HuffmanNode* root) {
+    if (!root) return;
+    destroyHuffman(root->left);
+    destroyHuffman(root->right);
+    delete root;
+}`),
+
+  define('generic-insertion-sort', 'Insertion Sort genérico: template e if constexpr', 'Ordenação', `6
+9 -2 7 7 0 3
+`, `    int n;
+    cin >> n;
+    vector<ll> a(n);
+    for (ll& value : a) cin >> value;
+    insertionSort(a);
+    for (int i = 0; i < n; i++) {
+        if (i) cout << ' ';
+        cout << a[i];
+    }
+    cout << endl;`,
+  'Ordena uma sequência numérica com uma função template; if constexpr seleciona a implementação válida para o tipo. Entrada: n ≥ 0 e n valores. Saída: valores em ordem crescente.', 'O(n²)', 'O(1) auxiliar', ['insertion sort', 'template', 'if constexpr', 'trocas'], '-2 0 3 7 7 9\n',
+  `template<class T> void insertionSort(vector<T>& a) {
+    if constexpr (is_arithmetic_v<T>) {
+        for (int i = 1; i < (int)a.size(); i++) {
+            int j = i;
+            while (j > 0 && a[j - 1] > a[j]) {
+                swap(a[j - 1], a[j]);
+                j--;
+            }
+        }
+    }
+}`),
+
+  define('constexpr-factorial', 'Fatorial: constexpr e recursão em runtime', 'Matemática', `5
+`, `    int n;
+    cin >> n;
+    if (n < 0 || n > 20) { cout << "FORA DO INTERVALO" << endl; return; }
+    ll result = factorial(n);
+    cout << result << endl;`,
+  'Calcula n! com uma função constexpr. O static_assert continua sendo avaliado na compilação; a chamada com stdin aparece na árvore de chamadas. Entrada: n entre 0 e 20. Saída: n!, ou FORA DO INTERVALO para n inválido.', 'O(n)', 'O(n) na pilha', ['constexpr', 'fatorial', 'recursão', 'static_assert'], '120\n',
+  `constexpr ll factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+static_assert(factorial(5) == 120);`),
+
+  define('postfix-evaluation', 'Expressão pós-fixa: pilha e exceções', 'Estruturas', `2 3 + 4 *
+`, `    stack<ll> values;
+    string token;
+    try {
+        while (cin >> token) {
+            if (token.size() == 1 && string("+-*/").find(token[0]) != string::npos) {
+                if (values.size() < 2) throw invalid_argument("operandos insuficientes");
+                ll right = values.top(); values.pop();
+                ll left = values.top(); values.pop();
+                values.push(applyOperator(token[0], left, right));
+            } else {
+                size_t consumed = 0;
+                ll value = stoll(token, &consumed);
+                if (consumed != token.size()) throw invalid_argument("token inválido");
+                values.push(value);
+            }
+        }
+        if (values.size() != 1) throw invalid_argument("expressão incompleta");
+        cout << values.top() << endl;
+    } catch (const exception&) {
+        cout << "EXPRESSAO INVALIDA" << endl;
+    }`,
+  'Avalia RPN com inteiros e operações +, -, * e divisão inteira. Entrada: tokens separados por espaços até EOF. Saída: resultado em ll, ou EXPRESSAO INVALIDA para tokens inválidos, falta de operandos, divisão por zero ou overflow. Mostra pilha, lançamento e captura de exceções.', 'O(número de tokens)', 'O(número de tokens)', ['rpn', 'pós-fixa', 'stack', 'try catch', 'exceção'], '20\n',
+  `ll applyOperator(char operation, ll left, ll right) {
+    if (operation == '/') {
+        if (right == 0 || (left == LLONG_MIN && right == -1)) throw invalid_argument("divisão inválida");
+        return left / right;
+    }
+    __int128 result = operation == '+' ? (__int128)left + right : operation == '-' ? (__int128)left - right : (__int128)left * right;
+    if (result < LLONG_MIN || result > LLONG_MAX) throw overflow_error("overflow");
+    return (ll)result;
+}`),
+
+  define('euclidean-gcd-goto', 'Euclides: saltos e rótulos', 'Matemática', `48 18
+`, `    ll a, b;
+    cin >> a >> b;
+    cout << gcdWithLabels(a, b) << endl;`,
+  'Executa Euclides com rótulo e goto para demonstrar o acompanhamento de saltos sem mudar o escopo das variáveis. Entrada: a e b não negativos. Saída: MDC(a, b), com MDC(0, 0) = 0.', 'O(log min(a, b)), para a,b > 0', 'O(1)', ['mdc', 'goto', 'rótulo', 'controle de fluxo'], '6\n',
+  `ll gcdWithLabels(ll a, ll b) {
+repeat:
+    if (b == 0) return a;
+    ll remainder = a % b;
+    a = b;
+    b = remainder;
+    goto repeat;
+}`),
+
+  define('lcs-string-table', 'LCS: tabela de strings e reconstrução', 'DP', `ABCBDAB
+BDCABA
+`, `    string a, b;
+    getline(cin, a);
+    getline(cin, b);
+    int n = (int)a.size(), m = (int)b.size();
+    vector<vector<string>> dp(n + 1, vector<string>(m + 1));
+    for (int i = 1; i <= n; i++) {
+        for (int j = 1; j <= m; j++) {
+            if (a[i - 1] == b[j - 1]) dp[i][j] = dp[i - 1][j - 1] + a[i - 1];
+            else dp[i][j] = dp[i - 1][j].size() >= dp[i][j - 1].size() ? dp[i - 1][j] : dp[i][j - 1];
+        }
+    }
+    cout << dp[n][m].size() << endl;
+    cout << dp[n][m] << endl;`,
+  'Guarda uma LCS inteira em cada célula para tornar a reconstrução visível. Entrada: duas linhas de texto, que podem ser vazias. Saída: tamanho e uma subsequência comum máxima; empates escolhem a célula acima. É uma versão didática, com custo extra das cópias de strings.', 'O(nm · min(n, m))', 'O(nm · min(n, m))', ['lcs', 'strings', 'matriz textual', 'dp', 'reconstrução'], '4\nBCBA\n'),
 ];

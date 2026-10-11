@@ -43,7 +43,7 @@ export interface CallFrame {
   function: string;
   depth: number;
   line: number;
-  status: 'active' | 'returned';
+  status: 'active' | 'returned' | 'threw';
 }
 
 export type StructureView = 'items' | 'set' | 'map' | 'record' | 'sequence' | 'stack' | 'queue' | 'deque' | 'priority' | 'union-find' | 'binary-tree' | 'string' | 'bits';
@@ -56,7 +56,7 @@ export const STRUCTURE_VIEWS: { value: StructureView; label: string }[] = [
   { value: 'items', label: 'Elementos' },
   { value: 'set', label: 'Conjunto' },
   { value: 'map', label: 'Mapa: chave → valor' },
-  { value: 'record', label: 'Pair / tuple' },
+  { value: 'record', label: 'Campos / pair / tuple' },
   { value: 'sequence', label: 'Vetor com índices' },
   { value: 'stack', label: 'Pilha' },
   { value: 'queue', label: 'Fila' },
@@ -75,7 +75,8 @@ export function inferStructureView(structure: Pick<StructureSnapshot, 'kind'>): 
   if (kind === 'bitset') return 'bits';
   if (kind.includes('map')) return 'map';
   if (kind.includes('set')) return 'set';
-  if (kind === 'pair' || kind === 'tuple') return 'record';
+  if (kind === 'pair' || kind === 'tuple' || kind === 'record') return 'record';
+  if (kind === 'priority-heap') return 'binary-tree';
   if (kind.includes('priority-queue')) return 'priority';
   if (kind === 'stack') return 'stack';
   if (kind === 'queue') return 'queue';

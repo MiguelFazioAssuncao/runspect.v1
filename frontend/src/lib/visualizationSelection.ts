@@ -1,10 +1,12 @@
 import type { CallFrame, MatrixSnapshot, StructureSnapshot } from './structureViews';
 import type { TraceStep } from '@/types/visualizer';
+import type { ReferenceSnapshot } from './references';
 
 export const VISUALIZATION_OPTIONS = [
   { key: 'graph', label: 'Grafo', description: 'Vértices, arestas e caminhos.' },
   { key: 'vectors', label: 'Vetores', description: 'Valores, comparações e ordenação.' },
   { key: 'structures', label: 'Variáveis e estruturas', description: 'Variáveis, filas, pilhas, mapas e conjuntos.' },
+  { key: 'references', label: 'Objetos e ponteiros', description: 'Campos de objetos, referências e ligações de listas e árvores.' },
   { key: 'matrices', label: 'Matrizes e DP', description: 'Células e dependências entre valores.' },
   { key: 'calls', label: 'Chamadas de funções', description: 'Árvore e pilha de chamadas, incluindo recursão.' },
   { key: 'output', label: 'Saída do programa', description: 'Texto impresso pelo programa na visualização.' },
@@ -39,6 +41,7 @@ export function traceVisualizationKeys(steps: readonly TraceStep[], output = '')
     if (step.step_event === 'ADD_NODE' || step.step_event === 'ADD_EDGE') capabilities.add('graph');
     if (step.step_event === 'VECTOR_INIT') capabilities.add('vectors');
     if (step.step_event === 'SET_MATRIX') capabilities.add('matrices');
+    if (step.step_event === 'SET_REFERENCES') capabilities.add('references');
     if (step.step_event === 'SET_STRUCT' && step.data?.name !== 'Execução' && (step.data?.name !== 'Variáveis' || !!step.data?.items?.length)) capabilities.add('structures');
     if (step.step_event === 'UNINITIALIZED' && step.data?.initialized === false) capabilities.add('structures');
     if (step.step_event === 'CALL_ENTER' && (step.data?.parent != null || step.data?.function !== 'main')) capabilities.add('calls');
@@ -49,7 +52,7 @@ export function traceVisualizationKeys(steps: readonly TraceStep[], output = '')
 
 export const DEFAULT_VISUALIZATION_SELECTION: VisualizationSelection = {
   graph: true, vectors: false, structures: false, matrices: false,
-  calls: false, output: false, analysis: false, legend: false,
+  calls: false, output: false, analysis: false, legend: false, references: false,
 };
 
 export function visualizationSelectionLabel(selection: VisualizationSelection): string {
@@ -63,18 +66,20 @@ export function selectVisualizationContent(player: {
   structs: StructureSnapshot[];
   matrices: MatrixSnapshot[];
   calls: CallFrame[];
+  references?: ReferenceSnapshot;
   programConsole: { output: string; warnings: string[] };
 }, selection: VisualizationSelection) {
   const structs = selection.structures ? player.structs.filter(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0)) : [];
   const matrices = selection.matrices ? player.matrices : [];
   const calls = selection.calls ? player.calls : [];
+  const references = selection.references ? player.references : undefined;
   const hasGraph = selection.graph && player.graphState.nodes.length > 0;
   const hasVectors = selection.vectors && player.vectors.length > 0;
-  const hasStructs = structs.length > 0 || matrices.length > 0 || calls.length > 0;
+  const hasStructs = structs.length > 0 || matrices.length > 0 || calls.length > 0 || !!(references?.objects.length || references?.roots.length);
   const hasAnalysis = selection.analysis && player.graphState.nodes.length > 0;
   const hasConsole = selection.output && (!!player.programConsole.output || player.programConsole.warnings.length > 0);
   return {
-    structs, matrices, calls, hasGraph, hasVectors, hasStructs, hasAnalysis, hasConsole,
+    structs, matrices, calls, references, hasGraph, hasVectors, hasStructs, hasAnalysis, hasConsole,
     hasVisualization: hasGraph || hasVectors || hasStructs,
     hasContent: hasGraph || hasVectors || hasStructs || hasAnalysis || hasConsole,
   };

@@ -78,6 +78,10 @@ func TestRunHandlerRejectsInvalidRequestsBeforeRunning(t *testing.T) {
 		{"trailing garbage", `{"code":"int main() {}"} invalid`},
 		{"oversized trailing whitespace", `{"code":"int main() {}"}` + strings.Repeat(" ", 256*1024)},
 		{"oversized stdin", string(oversizedStdin)},
+		{"negative frames", `{"code":"int main() {}","trace_options":{"max_steps":-1}}`},
+		{"excessive frames", `{"code":"int main() {}","trace_options":{"max_steps":10001}}`},
+		{"excessive items", `{"code":"int main() {}","trace_options":{"max_items":2049}}`},
+		{"invalid limit type", `{"code":"int main() {}","trace_options":{"max_items":"large"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

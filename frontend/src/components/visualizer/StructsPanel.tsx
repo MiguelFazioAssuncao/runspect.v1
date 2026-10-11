@@ -6,22 +6,27 @@ import type { CallFrame, MatrixSnapshot, StructureSnapshot } from '@/lib/structu
 import { CHANGE_LABELS, STRUCTURE_PAGE_SIZE } from '@/lib/structureViews';
 import { CallTree, MatrixView, StructureView } from './StructureViews';
 import './structures.css';
+import { ReferenceView } from './ReferenceView';
+import type { ReferenceSnapshot } from '@/lib/references';
 
 interface StructsPanelProps {
   structs: StructureSnapshot[];
   matrices?: MatrixSnapshot[];
   calls?: CallFrame[];
+  references?: ReferenceSnapshot;
   primary?: boolean;
   solo?: boolean;
 }
 
-export const StructsPanel: React.FC<StructsPanelProps> = ({ structs, matrices = [], calls = [], primary = false, solo = false }) => {
-  if (structs.length === 0 && matrices.length === 0 && calls.length === 0) return null;
+export const StructsPanel: React.FC<StructsPanelProps> = ({ structs, matrices = [], calls = [], references, primary = false, solo = false }) => {
+  const hasReferences = !!(references?.objects.length || references?.roots.length);
+  if (structs.length === 0 && matrices.length === 0 && calls.length === 0 && !hasReferences) return null;
   const variables = primary ? structs.filter(struct => struct.name === 'Variáveis') : [];
   const cards = primary ? structs.filter(struct => struct.name !== 'Variáveis') : structs;
 
   return <ResizablePanel title="Estruturas e variáveis" className={`structures-workspace${primary ? ' structures-workspace-primary' : ''}`} fill={solo}>
   <div className={`structs-panel${primary ? ' structs-panel-primary' : ''}${solo ? ' structs-panel-solo' : ''}`}>
+    {hasReferences && references && <ReferenceView snapshot={references} />}
     {variables.map(structure => <ResizablePanel title={structure.name} key={structure.name}><div className="struct-row struct-row-variables">
       <span className="struct-name">{structure.name}</span>
       <div className="struct-items">{structure.items.length === 0 ? <span className="struct-empty">vazio (size 0)</span> : structure.items.slice(0, STRUCTURE_PAGE_SIZE).map((item, index) => {

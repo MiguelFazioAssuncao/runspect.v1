@@ -14,6 +14,7 @@ export async function mockVisualizationAnalysis(page, getSteps) {
       if (step.step_event === 'ADD_NODE' || step.step_event === 'ADD_EDGE') capabilities.add('graph');
       if (step.step_event === 'VECTOR_INIT') capabilities.add('vectors');
       if (step.step_event === 'SET_MATRIX') capabilities.add('matrices');
+      if (step.step_event === 'SET_REFERENCES') capabilities.add('references');
       if (step.step_event === 'SET_STRUCT' && step.data?.name !== 'Execução') capabilities.add('structures');
       if (step.step_event === 'CALL_ENTER' && (step.data?.parent != null || step.data?.function !== 'main')) capabilities.add('calls');
       if (step.step_event === 'PROGRAM_OUTPUT') capabilities.add('output');

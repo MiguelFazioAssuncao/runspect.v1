@@ -91,6 +91,23 @@ describe('programas independentes C++17', () => {
     ['tuple-optional', '3\n7 -4\n8 -2\n9 -2\n', '8 -2\n'],
     ['bitset-switch', '0\n', '00000000\n'],
     ['bitset-switch', '6\n1 7\n3 0\n2 7\n1 8\n9 3\n1 -1\n', '00000001\n'],
+    ['linked-list-reversal', '0\n', '\n'],
+    ['linked-list-reversal', '3\n-2 -2 9\n', '9 -2 -2\n'],
+    ['bst-insertion', '0\n', '\n'],
+    ['bst-insertion', '4\n2 2 -1 0\n', '-1 0 2 2\n'],
+    ['trie-prefix-count', '0\n2\na\nz\n', '0\n0\n'],
+    ['huffman-tree', '0\n', '0\n'],
+    ['huffman-tree', '1\n99\n', '0\n'],
+    ['generic-insertion-sort', '0\n', '\n'],
+    ['constexpr-factorial', '0\n', '1\n'],
+    ['constexpr-factorial', '20\n', '2432902008176640000\n'],
+    ['constexpr-factorial', '21\n', 'FORA DO INTERVALO\n'],
+    ['postfix-evaluation', '8 0 /\n', 'EXPRESSAO INVALIDA\n'],
+    ['postfix-evaluation', '1 +\n', 'EXPRESSAO INVALIDA\n'],
+    ['postfix-evaluation', '9223372036854775807 1 +\n', 'EXPRESSAO INVALIDA\n'],
+    ['postfix-evaluation', '-8 2 /\n', '-4\n'],
+    ['euclidean-gcd-goto', '0 0\n', '0\n'],
+    ['lcs-string-table', '\nabc\n', '0\n\n'],
   ])('%s trata a entrada de borda %#', (id, stdin, expected) => {
     expect(run(id, stdin)).toBe(expected);
   });

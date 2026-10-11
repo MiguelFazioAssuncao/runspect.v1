@@ -4,20 +4,41 @@ Frontend Next.js do Runspect. O backend Go precisa estar rodando separadamente
 porque compila e executa C++17 com `g++` e sandbox do sistema operacional.
 
 Código C++ comum recebe visualização automática de variáveis, vetores,
-strings e matrizes. Representações usuais de grafos também são reconhecidas.
+strings, matrizes, registros públicos, objetos e ponteiros. Representações
+usuais de grafos também são reconhecidas.
 Código com chamadas `viz::` mantém a visualização manual.
 
-O catálogo **técnicas** contém 24 programas C++17 independentes, sem chamadas
+O catálogo **técnicas** contém 35 programas C++17 independentes, sem chamadas
 `viz::` nem dependência de `visualizer.h`. Todos usam o mesmo template
 competitivo do editor: `#define endl '\n'`, `using ll = long long`,
 `solve()` e `signed main()` com entrada/saída rápida. Cada técnica documenta
 entrada, saída e complexidades. A visualização é gerada automaticamente pelo
 backend, sem alterar o programa mostrado no editor.
 
+Novas técnicas: reversão de lista ligada, inserção e percurso em BST, trie
+com contagem de prefixos, árvore de Huffman, insertion sort genérico,
+fatorial `constexpr`, avaliação de expressão pós-fixa com exceções, Euclides
+com `goto` e LCS com tabela de strings.
+
+O painel **Objetos e ponteiros** permite alternar entre ligações e campos,
+inspecionar referências compartilhadas/cíclicas e identificar destinos
+desconhecidos ou liberados. Vetores e objetos grandes são paginados. O
+seletor **Captura da visualização** oferece até 10.000 passos e 2.048 elementos
+por estrutura, mantendo os limites de execução do backend.
+
 Para compilar todos os exemplos com `g++` e conferir as saídas e os casos de
 borda, execute `npm run test:cpp`. Para verificar também a instrumentação,
 com as dependências Clang do backend instaladas, execute
 `RUNSPECT_TEST_AUTOMATIC=1 npm run test:cpp` (Linux).
+
+`npm test`, `npx tsc --noEmit` e `npm run lint` verificam o frontend.
+`npm run test:resources` verifica os novos exemplos, a API Go real,
+reprodução, exceções, paginação e viewport móvel com Chromium. Informe
+`PLAYWRIGHT_MODULE=/caminho/playwright/index.mjs` se o pacote não estiver
+instalado localmente. O harness substitui o editor Monaco por textarea;
+workspace, painéis e player são os componentes reais. Opcionalmente,
+`RUNSPECT_SCREENSHOTS=/tmp/evidencias` salva capturas. Apenas as fixtures
+revisadas desse teste usam o backend local com sandbox desativado.
 
 No Linux, o backend precisa de `g++`, `bubblewrap`, `util-linux` e
 `python3-clang` (incluído no Dockerfile). Veja os formatos reconhecidos e
