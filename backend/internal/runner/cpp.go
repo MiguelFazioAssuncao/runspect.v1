@@ -230,8 +230,6 @@ func (r *CppRunner) compile(ctx context.Context, dir string, metrics *domain.Exe
 	err := cmd.Run()
 	readCompileResources(resourcesPath, metrics)
 	if ctx.Err() != nil {
-		// Killing the entire process group prevents the compiler wrapper from
-		// reaping all children, so CPU and RSS can be under-reported on timeout.
 		metrics.CompileResourcesComplete = false
 	}
 	if ctx.Err() == context.DeadlineExceeded {
@@ -274,10 +272,10 @@ func describeExit(err error, stderr string) string {
 	return fmt.Sprintf("Erro em tempo de execução: %s\n%s", reason, message)
 }
 
-func (r *CppRunner) execute(dir, stdin string, automatic bool, metrics *domain.ExecutionMetrics, options domain.TraceOptions) domain.ExecutionResult {
+func (r *CppRunner) execute(parent context.Context, dir, stdin string, automatic bool, metrics *domain.ExecutionMetrics, options domain.TraceOptions) domain.ExecutionResult {
 	start := time.Now()
 	defer func() { metrics.ExecuteMs += elapsedMs(start) }()
-	ctx, cancel := context.WithTimeout(context.Background(), r.RunTimeout)
+	ctx, cancel := context.WithTimeout(parent, r.RunTimeout)
 	defer cancel()
 
 	base := r.baseDir(dir)
@@ -449,8 +447,6 @@ func finishExecution(result domain.ExecutionResult, trace instrumentation) domai
 	}
 	remaining := strings.TrimPrefix(result.Output, tracedOutput.String())
 	if trace.Mode != "manual" && remaining != "" {
-		// Only untraced output (e.g. printf or output beyond the frame limit)
-		// belongs to the final frame. cout chunks already have their own lines.
 		output := domain.TraceStep{StepEvent: "PROGRAM_OUTPUT", Data: map[string]any{"text": remaining}}
 		if !strings.HasPrefix(result.Output, tracedOutput.String()) {
 			output.Data["replace"] = true
@@ -478,12 +474,20 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 }
 
 func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptions) (result domain.ExecutionResult) {
+	return r.RunWithContext(context.Background(), code, stdin, options)
+}
+
+func (r *CppRunner) RunWithContext(ctx context.Context, code, stdin string, options domain.TraceOptions) (result domain.ExecutionResult) {
 	options = options.Normalized()
 	start := time.Now()
 	metrics := &domain.ExecutionMetrics{CompileResourcesComplete: true}
 	prepared := false
 	stage := "prepare"
 	defer func() {
+		if ctx.Err() != nil {
+			result.Success = false
+			result.Errors = "Execução cancelada"
+		}
 		if !prepared {
 			metrics.PrepareMs = elapsedMs(start)
 		}
@@ -498,6 +502,9 @@ func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptio
 			metrics.FailedStage = stage
 		}
 	}()
+	if ctx.Err() != nil {
+		return fail("Execução cancelada")
+	}
 
 	if message := r.checkTools(); message != "" {
 		return fail(message)
@@ -528,27 +535,32 @@ func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptio
 			return fail("Falha ao preparar binário em cache")
 		}
 		stage = "execute"
-		result := r.execute(tmpDir, stdin, cached.trace.Mode != "manual", metrics, options)
+		result := r.execute(ctx, tmpDir, stdin, cached.trace.Mode != "manual", metrics, options)
 		return finishExecution(result, cached.trace)
 	}
 	analysisStart := time.Now()
-	trace, message := r.instrument(tmpDir, code)
+	stage = "analysis"
+	trace, message := r.instrumentSource(ctx, tmpDir, code, false)
 	metrics.AnalysisMs = elapsedMs(analysisStart)
+	if ctx.Err() != nil {
+		return fail("Execução cancelada")
+	}
 	if message != "" {
 		metrics.Fallback = true
 		metrics.AnalysisTimeout = message == "Tempo de análise automática excedido"
-		// Clang and GCC accept different extensions. A failure to instrument
-		// must not prevent otherwise valid C++ from running with GCC.
 		trace = instrumentation{Mode: "unavailable", Warnings: []string{"Visualização automática indisponível para este código. " + message}}
 		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 			return fail("Falha ao restaurar código original")
 		}
 	}
 
-	compileCtx, cancelCompile := context.WithTimeout(context.Background(), r.CompileTimeout)
+	compileCtx, cancelCompile := context.WithTimeout(ctx, r.CompileTimeout)
 	stage = "compile"
 	compileMessage := r.compile(compileCtx, tmpDir, metrics)
 	cancelCompile()
+	if ctx.Err() != nil {
+		return fail("Execução cancelada")
+	}
 	if message := compileMessage; message != "" {
 		if trace.Mode != "automatic" {
 			return fail(message)
@@ -557,9 +569,7 @@ func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptio
 		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 			return fail("Falha ao restaurar código original")
 		}
-		// The original program gets its own compilation budget. A timed-out
-		// instrumented attempt must not leave the fallback context expired.
-		fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), r.CompileTimeout)
+		fallbackCtx, cancelFallback := context.WithTimeout(ctx, r.CompileTimeout)
 		beforeFallback := metrics.CompileMs
 		originalError := r.compile(fallbackCtx, tmpDir, metrics)
 		metrics.FallbackCompileMs = metrics.CompileMs - beforeFallback
@@ -579,6 +589,6 @@ func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptio
 		}
 	}
 	stage = "execute"
-	result = r.execute(tmpDir, stdin, trace.Mode != "manual", metrics, options)
+	result = r.execute(ctx, tmpDir, stdin, trace.Mode != "manual", metrics, options)
 	return finishExecution(result, trace)
 }
