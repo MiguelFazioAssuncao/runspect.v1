@@ -14,6 +14,8 @@ interface CodeEditorProps {
   code: string;
   setCode: (code: string) => void;
   onRun: () => void;
+  onCancel?: () => void;
+  disabled?: boolean;
   isLoading: boolean;
   output?: string;
   hasError?: boolean;
@@ -25,6 +27,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   code,
   setCode,
   onRun,
+  onCancel,
+  disabled = false,
   isLoading,
   output,
   hasError = false,
@@ -38,6 +42,10 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
+  const runRef = useRef(onRun);
+  const busyRef = useRef(isLoading || disabled);
+
+  useEffect(() => { runRef.current = onRun; busyRef.current = isLoading || disabled; }, [onRun, isLoading, disabled]);
 
   const updateDecoration = (editor: MonacoEditor.IStandaloneCodeEditor) => {
     const decorations = decorationsRef.current;
@@ -69,6 +77,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     editorRef.current = editor;
     monacoRef.current = monaco;
     decorationsRef.current = editor.createDecorationsCollection();
+    editor.addAction({ id: 'runspect.execute', label: 'Executar algoritmo', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter], run: () => { if (!busyRef.current) runRef.current(); } });
     updateDecoration(editor);
   };
 
@@ -90,10 +99,12 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         <span className="text-xs font-mono font-semibold text-slate-400">solution.cpp</span>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setShowSettings(true)} title="Personalizar editor" aria-label="Personalizar editor" aria-haspopup="dialog" className="editor-settings-trigger"><Settings2 size={15} /></button>
+          {isLoading && onCancel && <button type="button" onClick={onCancel} className="cancel-run">Cancelar execução</button>}
           <button
             type="button"
             onClick={onRun}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
+            title="Executar algoritmo (Ctrl+Enter ou ⌘+Enter)"
             className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors disabled:opacity-50"
           >
             {isLoading ? 'Executando...' : 'Executar Algoritmo'}
