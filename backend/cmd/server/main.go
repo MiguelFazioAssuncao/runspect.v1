@@ -48,7 +48,6 @@ func envInt(key string, fallback int) int {
 	return fallback
 }
 
-// Zero disables optional caches; negative or malformed values use the default.
 func envCacheLimit(key string, fallback int) int {
 	if value := os.Getenv(key); value != "" {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
@@ -84,8 +83,6 @@ func (w *statusWriter) Write(data []byte) (int, error) {
 
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// Record overload and rate-limit rejections as well as accepted requests.
-// Only the two fixed API paths are logged; query strings and bodies stay out.
 func requestMetrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/run" && r.URL.Path != "/api/analyze" {
@@ -176,7 +173,7 @@ func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 			}
 			return
 		}
-		res := cppRunner.RunWithOptions(req.Code, req.Stdin, req.TraceOptions)
+		res := cppRunner.RunWithContext(r.Context(), req.Code, req.Stdin, req.TraceOptions)
 		performanceLog.Info("cpp_run", "success", res.Success, "trace_mode", res.TraceMode, "metrics", res.Metrics)
 		status := http.StatusOK
 		if !res.Success {
