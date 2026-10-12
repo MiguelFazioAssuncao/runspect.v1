@@ -2,6 +2,10 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CircleHelp, Clock3, Network, SlidersHorizontal } from 'lucide-react';
+import { LearningPanel } from '@/components/LearningPanel';
+import type { SampleRun } from '@/components/LearningPanel';
+import { useStudyProject } from '@/hooks/useStudyProject';
+import { MAX_PROJECT_BYTES, normalizeSearch, parseStudyProject, serializeStudyProject, validateProgram } from '@/lib/studyProject';
 import { WorkspaceSplit } from '@/components/workspace/WorkspaceSplit';
 import { PanelInteractionContext, ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { flushSync } from 'react-dom';
@@ -26,9 +30,8 @@ import type { VisualizationKey, VisualizationSelection } from '@/lib/visualizati
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { useVisualizerPlayer } from '@/hooks/useVisualizerPlayer';
 import { examples } from '@/lib/examples';
-import { DEFAULT_CPP_CODE } from '@/lib/cppTemplate';
 import { convertToPureCpp } from '@/lib/codeConversion';
-import { exportJson } from '@/lib/export';
+import { downloadFile, exportJson } from '@/lib/export';
 import { terminalOutput } from '@/lib/terminalOutput';
 import { runspectApiUrl } from '@/lib/runspectApiUrl';
 import { captureSvgSnapshot, DEFAULT_SVG_OPTIONS } from '@/lib/svgExport';
@@ -61,11 +64,10 @@ interface RecordingSession {
 type ExampleItem = (typeof examples)[number];
 
 const filterExamples = (query: string, category: string): ExampleItem[] => {
-  const normalizedQuery = query.toLocaleLowerCase();
+  const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
   return examples.filter((example) => {
-    const matchesQuery = `${example.name} ${example.description ?? ''} ${(example.tags ?? []).join(' ')}`
-      .toLocaleLowerCase()
-      .includes(normalizedQuery);
+    const searchable = normalizeSearch(`${example.name} ${example.description} ${example.tags.join(' ')}`);
+    const matchesQuery = terms.every(term => searchable.includes(term));
     return matchesQuery && (category === 'todas' || (example.category ?? 'Outros') === category);
   });
 };
@@ -166,11 +168,19 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'references', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
-  const [code, setCode] = useState(DEFAULT_CPP_CODE);
-  const [customCode, setCustomCode] = useState(DEFAULT_CPP_CODE);
-  const [stdin, setStdin] = useState(examples[0].stdin ?? '');
+  const { project, status: saveStatus, updateProject } = useStudyProject();
+  const [exampleCode, setExampleCode] = useState(examples[0].code);
+  const [exampleStdin, setExampleStdin] = useState(examples[0].stdin);
   const [tracePreset, setTracePreset] = useState<TracePreset>('standard');
   const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
+  const code = editorTab === 'custom' ? project.code : exampleCode;
+  const stdin = editorTab === 'custom' ? project.stdin : exampleStdin;
+  const setCode = (value: string) => editorTab === 'custom' ? updateProject({ code: value }) : setExampleCode(value);
+  const setStdin = (value: string) => editorTab === 'custom' ? updateProject({ stdin: value }) : setExampleStdin(value);
+  const [projectNotice, setProjectNotice] = useState('');
+  const [sampleRun, setSampleRun] = useState<SampleRun | null>(null);
+  const [executedCode, setExecutedCode] = useState('');
+  const [executedInput, setExecutedInput] = useState('');
   const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
   const [exampleQuery, setExampleQuery] = useState('');
   const [exampleCategory, setExampleCategory] = useState('todas');
@@ -207,6 +217,8 @@ export default function Home() {
   const recPlayerRef = useRef<PlayerState>(recPlayer);
   const recordingSessionRef = useRef<RecordingSession | null>(null);
   const runRequestRef = useRef(false);
+  const runControllerRef = useRef<AbortController | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
   const visibleAreaRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -226,8 +238,8 @@ export default function Home() {
 
   const selectExample = (example: ExampleItem) => {
     setSelectedExampleId(example.id);
-    setCode(example.code);
-    setStdin(example.stdin ?? '');
+    setExampleCode(example.code);
+    setExampleStdin(example.stdin);
   };
 
   const changeExampleCategory = (category: string) => {
@@ -304,6 +316,7 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
+      runControllerRef.current?.abort();
       recordingSessionRef.current?.dispose.abort(new Error('A página de gravação foi fechada.'));
       recordingSessionRef.current = null;
     };
@@ -381,8 +394,6 @@ export default function Home() {
         onStatus: (status) => { if (activeSession()) setRecording(status); },
         capture: async (step, signals) => {
           throwIfRecordingAborted(signals);
-          // Commit both the requested frame and the graph layout before reading DOM.
-          // No animation-frame wait: background tabs must be able to export too.
           const renderStart = performance.now();
           flushSync(() => setRecordingStage(current => current && ownsSession() ? { ...current, index: step } : current));
           performance.measure('recording:render', { start: renderStart });
@@ -411,9 +422,7 @@ export default function Home() {
       link.href = url;
       link.download = filename;
       document.body.appendChild(link);
-      try { link.click(); } catch {
-        // The explicit download link remains available if auto-download is blocked.
-      } finally { link.remove(); }
+      try { link.click(); } catch {} finally { link.remove(); }
       const codecNotice = result.codec === 'avc' ? '' : ` Codec ${result.codec.toUpperCase()}: a compatibilidade com outros aplicativos pode variar.`;
       setRecording({
         phase: 'done', progress: 1,
@@ -437,16 +446,23 @@ export default function Home() {
   const runCode = async (source = code, input = stdin) => {
     if (recordingSessionRef.current || runRequestRef.current) return;
     runRequestRef.current = true;
+    const controller = new AbortController();
+    runControllerRef.current = controller;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 120_000);
     player.setIsPlaying(false);
     setSteps([]);
     setUntracedOutput('');
     setIsLoading(true);
     setHasError(false);
+    setTraceMode(undefined);
+    setSampleRun(null);
     setOutput('Compilando e executando...');
     try {
       const response = await fetch(runspectApiUrl('/api/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({ code: source, stdin: input, trace_options: { max_steps: TRACE_PRESETS[tracePreset].max_steps, max_items: TRACE_PRESETS[tracePreset].max_items } }),
       });
       const responseText = await response.text();
@@ -456,10 +472,12 @@ export default function Home() {
       } catch {
         throw new Error(
           response.status === 502 || response.status === 504
-            ? 'O frontend não conseguiu alcançar o backend. Configure RUNSPECT_API_URL nas variáveis de Actions e publique novamente.'
+            ? 'O servidor de execução está indisponível no momento. Aguarde alguns instantes e tente novamente.'
             : `O servidor retornou uma resposta inválida (HTTP ${response.status}).`,
         );
       }
+      if (controller.signal.aborted) return;
+      setBackendStatus('connected');
       setTraceMode(result.trace_mode);
       setRunId((id) => id + 1);
       if (!response.ok || !result.success) {
@@ -468,20 +486,30 @@ export default function Home() {
         const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
         setOutput(`${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`);
       } else {
+        setExecutedCode(source);
+        setExecutedInput(input);
+        if (editorTab === 'examples') setSampleRun({ exampleId: selectedExampleId, code: source, stdin: input, output: result.output ?? '' });
         setSteps(result.steps ?? []);
         setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
         const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
         setOutput(`Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`);
       }
     } catch (error) {
+      if (controller.signal.aborted) {
+        setHasError(timedOut);
+        setOutput(timedOut ? 'O servidor demorou mais que o esperado. Tente novamente com uma entrada menor.' : 'Execução cancelada. Seu código foi preservado.');
+        return;
+      }
       setHasError(true);
       if (error instanceof TypeError) {
         setBackendStatus('disconnected');
-          setOutput(`Não foi possível conectar ao servidor de execução. Verifique RUNSPECT_API_URL nas variáveis de Actions e a URL pública do backend Go. (${error.message || 'falha de rede'})`);
+        setOutput('Não foi possível conectar ao servidor de execução. Seu código está disponível no editor. Verifique sua conexão e tente novamente em alguns instantes.');
       } else {
         setOutput(error instanceof Error ? error.message : 'Não foi possível executar o código.');
       }
     } finally {
+      window.clearTimeout(timeout);
+      runControllerRef.current = null;
       runRequestRef.current = false;
       setIsLoading(false);
     }
@@ -489,16 +517,33 @@ export default function Home() {
 
   const requestRun = (source = code, input = stdin) => {
     if (recordingSessionRef.current || runRequestRef.current) return;
+    try {
+      validateProgram(source, input);
+      if (!source.trim()) throw new Error('Escreva um programa C++ antes de executar.');
+    } catch (error) {
+      setHasError(true);
+      setOutput(error instanceof Error ? error.message : 'Código inválido.');
+      return;
+    }
     setVisualizationPicker({ source, input, execute: true });
   };
 
   const loadDocumentationExample = (method: DocumentationMethod, execute: boolean) => {
-    setCode(method.example);
-    setCustomCode(method.example);
-    setStdin(method.stdin ?? '');
+    updateProject({ code: method.example, stdin: method.stdin ?? '' });
     setEditorTab('custom');
     if (execute) requestRun(method.example, method.stdin ?? '');
     setShowDocumentation(false);
+  };
+
+  const importProject = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (file.size > MAX_PROJECT_BYTES) throw new Error('O projeto excede 512 KiB.');
+      const imported = parseStudyProject(await file.text());
+      updateProject(imported);
+      setEditorTab('custom');
+      setProjectNotice('Projeto aberto. Código, entrada e progresso foram restaurados.');
+    } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível abrir o projeto.'); }
   };
 
   const handleExportSvg = () => {
@@ -535,7 +580,7 @@ export default function Home() {
       </header>
 
       <section className="workspace-heading">
-        <div><p className="section-kicker">Interactive execution workspace</p><h1>Observe the algorithm, step by step.</h1></div>
+        <div><p className="section-kicker">Laboratório de programação competitiva</p><h1>Entenda cada passo do algoritmo.</h1></div>
         <div className="run-state"><Activity className="h-3.5 w-3.5" /> {isLoading ? 'executando' : 'pronto para executar'}</div>
       </section>
 
@@ -545,10 +590,7 @@ export default function Home() {
             <div className="editor-tabs" role="tablist" aria-label="Fonte do código">
               <button
                 className={`editor-tab ${editorTab === 'custom' ? 'editor-tab-active' : ''}`}
-                onClick={() => {
-                  setCode(customCode);
-                  setEditorTab('custom');
-                }}
+                onClick={() => setEditorTab('custom')}
                 role="tab"
                 aria-selected={editorTab === 'custom'}
               >
@@ -556,12 +598,7 @@ export default function Home() {
               </button>
               <button
                 className={`editor-tab ${editorTab === 'examples' ? 'editor-tab-active' : ''}`}
-                onClick={() => {
-                  const example = examples.find((item) => item.id === selectedExampleId) ?? examples[0];
-                  setCode(example.code);
-                  setStdin(example.stdin ?? '');
-                  setEditorTab('examples');
-                }}
+                onClick={() => setEditorTab('examples')}
                 role="tab"
                 aria-selected={editorTab === 'examples'}
               >
@@ -584,7 +621,7 @@ export default function Home() {
                   aria-label="Selecionar técnica de programação competitiva"
                 >
                   {visibleExamples.length === 0 && <option value="">nenhuma técnica encontrada</option>}
-                  {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+                  {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{project.completed.includes(ex.id) ? '✓ ' : ''}{ex.name}</option>)}
                 </select>
               </div>
             )}
@@ -592,14 +629,10 @@ export default function Home() {
           {editorTab === 'examples' && (() => {
             const example = examples.find((item) => item.id === selectedExampleId);
             if (!example) return null;
-            return (
-              <div className="example-info">
-                <strong>{example.name}</strong>
-                <span>{example.description}</span>
-                <small>{example.category} · {example.timeComplexity} · memória {example.memoryComplexity} · {(example.tags ?? []).join(' · ')}</small>
-                <button type="button" onClick={() => { setCode(example.code); setStdin(example.stdin ?? ''); }}>restaurar exemplo</button>
-              </div>
-            );
+            return <LearningPanel example={example} code={code} stdin={stdin} sampleRun={sampleRun} completed={project.completed}
+              onRestore={() => selectExample(example)}
+              onComplete={() => updateProject({ completed: project.completed.includes(example.id) ? project.completed.filter(id => id !== example.id) : [...project.completed, example.id] })}
+              onSelect={id => { const next = examples.find(item => item.id === id); if (next) { setExampleCategory('todas'); setExampleQuery(''); selectExample(next); } }} />;
           })()}
           {editorTab === 'custom' && (
             <div className="editor-actions">
@@ -608,14 +641,8 @@ export default function Home() {
                 className="convert-button"
                 onClick={() => {
                   try {
-                    const converted = convertToPureCpp(customCode);
-                    const blob = new Blob([converted], { type: 'text/x-c++src;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = 'solucao.cpp';
-                    link.click();
-                    URL.revokeObjectURL(url);
+                    const converted = convertToPureCpp(project.code);
+                    downloadFile(new Blob([converted], { type: 'text/x-c++src;charset=utf-8' }), 'solucao.cpp');
                     setConversionNotice('Arquivo solucao.cpp baixado com C++ puro.');
                   } catch (error) {
                     setConversionNotice(error instanceof Error ? error.message : 'Falha na conversão.');
@@ -629,19 +656,32 @@ export default function Home() {
               {conversionNotice && <span className="conversion-notice" role="status">{conversionNotice}</span>}
             </div>
           )}
+          <div className="project-actions">
+            <span role="status">{saveStatus === 'saving' ? 'Salvando…' : saveStatus === 'unavailable' ? 'Não foi possível salvar neste navegador. Baixe o projeto para guardar suas alterações.' : saveStatus === 'recovered' ? 'Não foi possível recuperar o rascunho salvo.' : editorTab === 'custom' ? 'Código e entrada salvos neste navegador' : 'Baixe o projeto para guardar suas edições do exemplo.'}</span>
+            <button type="button" onClick={() => {
+              try {
+                validateProgram(code, stdin);
+                downloadFile(new Blob([serializeStudyProject({ ...project, code, stdin })], { type: 'application/json;charset=utf-8' }), 'runspect-projeto.json');
+                setProjectNotice('Projeto baixado com código, entrada e progresso.');
+              } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível baixar o projeto.'); }
+            }}>Baixar projeto</button>
+            <button type="button" onClick={() => importRef.current?.click()} disabled={isLoading || isRecording}>Abrir projeto</button>
+            <input ref={importRef} type="file" accept=".json,application/json" hidden aria-label="Arquivo de projeto" onChange={event => { void importProject(event.target.files?.[0]); event.target.value = ''; }} />
+            {projectNotice && <p role="status">{projectNotice}</p>}
+          </div>
+          {steps.length > 0 && (code !== executedCode || stdin !== executedInput) && <p className="execution-notice" role="status">O código ou a entrada mudou. Execute novamente para atualizar a visualização.</p>}
           <div className="code-editor-wrap">
             <CodeEditor
               code={code}
-              setCode={(nextCode) => {
-                setCode(nextCode);
-                if (editorTab === 'custom') setCustomCode(nextCode);
-              }}
+              setCode={setCode}
               onRun={() => requestRun()}
+              onCancel={() => runControllerRef.current?.abort()}
+              disabled={isRecording}
               isLoading={isLoading}
               output={terminalText}
               hasError={hasError}
               logs={player.logs}
-              activeLine={player.line}
+              activeLine={code === executedCode ? player.line : null}
             />
           </div>
           <ResizablePanel title="Entrada (stdin)" defaultCollapsed className="stdin-workspace">
