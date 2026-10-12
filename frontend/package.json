@@ -3,17 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/prepare-editor.mjs",
     "dev": "next dev",
-    "build": "next build",
+    "prebuild": "node scripts/prepare-editor.mjs",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:panels": "node scripts/panels-browser.mjs",
     "test:capabilities": "node scripts/capabilities-browser.mjs",
     "test:resources": "node scripts/resources-browser.mjs",
+    "test:study": "node scripts/prepare-editor.mjs && node scripts/study-browser.mjs",
     "test:cpp": "vitest run --config vitest.cpp.config.mts"
   },
   "dependencies": {
+    "monaco-editor": "0.57.0",
     "@monaco-editor/react": "^4.7.0",
     "@types/d3": "^7.4.3",
     "d3": "^7.9.0",
