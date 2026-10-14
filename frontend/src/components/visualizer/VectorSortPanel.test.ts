@@ -76,10 +76,20 @@ describe('VectorSortPanel', () => {
     expect(html).toContain('índices fora do intervalo');
   });
 
-  it('limita células renderizadas e informa o total', () => {
+  it('pagina as células renderizadas e informa o total', () => {
     const items = Array.from({ length: 600 }, (_, index) => ({ index, value: index, state: 'default' as const }));
     const html = render([snapshot({ items, operation: null, range: null, pivot: null })]);
-    expect(html).toContain('exibindo os primeiros 512 de 600 elementos');
+    expect(html).toContain('elementos 0–511 de 600 · página 1 / 2');
+    expect(html).toContain('Próxima página do vetor a');
+    expect((html.match(/class="vector-index"/g) ?? []).length).toBe(512);
+  });
+
+  it('abre a página que contém a operação ativa', () => {
+    const items = Array.from({ length: 600 }, (_, index) => ({ index, value: index, state: 'default' as const }));
+    const html = render([snapshot({ items, operation: { kind: 'set', index: 599, value: 599 }, range: null, pivot: null })]);
+    expect(html).toContain('elementos 512–599 de 600 · página 2 / 2');
+    expect(html).toContain('599: 599');
+    expect((html.match(/class="vector-index"/g) ?? []).length).toBe(88);
   });
 
   it('não mantém o GenericTracePanel no projeto', () => {

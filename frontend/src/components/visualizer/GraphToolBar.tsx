@@ -42,6 +42,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onStopRecording,
 }) => (
   <div className="graph-toolbar">
+    {hasGraph && <>
     <select
       className="example-select"
       value={layout}
@@ -70,6 +71,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
     <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph || isRecording} title="Opções de download do grafo em SVG" aria-label="Exportar grafo em SVG" type="button">
       <Download className="h-3 w-3" /> SVG
     </button>
+    </>}
     <button className="toolbar-button" onClick={onExportJson} disabled={!hasSteps} type="button">
       <Download className="h-3 w-3" /> JSON
     </button>

@@ -2,11 +2,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { TraceStep } from '@/types/visualizer';
 import {
   createGraphReplay,
+  createGraphFlagIndex,
   frameCaption,
   frameEnds,
-  isDirected,
-  isMulti,
-  isWeighted,
 } from '@/lib/graphReducer';
 import { createVectorReplay } from '@/lib/vectorReducer';
 import { playerStartFrame } from '@/lib/playerStart';
@@ -86,9 +84,8 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     return () => window.clearTimeout(resetTimer);
   }, [steps, initialStepIndex, setCurrentStepIndex]);
 
-  const directed = useMemo(() => isDirected(steps, eventIndex), [steps, eventIndex]);
-  const weighted = useMemo(() => isWeighted(steps, eventIndex), [steps, eventIndex]);
-  const multi = useMemo(() => isMulti(steps, eventIndex), [steps, eventIndex]);
+  const graphFlags = useMemo(() => createGraphFlagIndex(steps), [steps]);
+  const { directed, weighted, multi } = graphFlags(eventIndex);
 
   const replayGraph = useMemo(() => createGraphReplay(steps), [steps]);
   const replayVectors = useMemo(() => createVectorReplay(steps), [steps]);
@@ -134,6 +131,7 @@ export function useVisualizerPlayer(steps: TraceStep[], startAtVisualization = f
     structs: traceState.structs,
     matrices: traceState.matrices,
     calls: traceState.calls,
+    references: traceState.references,
     reads: traceState.reads,
     writes: traceState.writes,
     vectorMeta: traceState.vectorMeta,

@@ -1,3 +1,4 @@
+import { confirmAllVisualizations, mockVisualizationAnalysis } from './browser-selection.mjs';
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/graph-browser.mjs
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +65,7 @@ let steps = [];
 const event = (step_event, data = {}) => steps.push({ step: steps.length, step_event, data });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
+await mockVisualizationAnalysis(page, () => steps);
 await page.route('**/api/run', route => route.fulfill({ json: { success: true, steps, time_ms: 1 } }));
 await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
 await page.route('**/healthz', route => route.fulfill({ json: { status: 'ok' } }));
@@ -122,7 +124,7 @@ try {
     event('STEP', { caption: 'Destaque' });
     event('ADD_EDGE', { u: 0, v: 7 });
     event('STEP', { caption: 'Nova aresta' });
-    await page.getByRole('button', { name: 'Executar Algoritmo' }).click();
+    await page.getByRole('button', { name: 'Executar Algoritmo' }).click(); await confirmAllVisualizations(page);
     await page.waitForFunction(selector => document.querySelectorAll(`${selector} [data-graph-edges] > path`).length === 7, svg);
     await settle();
     const before = await snapshot();
@@ -167,7 +169,7 @@ try {
   event('ADD_EDGE', { u: 1, v: 0 });
   event('ADD_EDGE', { u: 0, v: 0 });
   event('STEP');
-  await page.getByRole('button', { name: 'Executar Algoritmo' }).click();
+  await page.getByRole('button', { name: 'Executar Algoritmo' }).click(); await confirmAllVisualizations(page);
   await page.waitForFunction(selector => document.querySelectorAll(`${selector} [data-graph-edges] > path`).length === 4, svg);
   await settle();
   const multi = await snapshot();

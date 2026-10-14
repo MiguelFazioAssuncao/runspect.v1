@@ -12,6 +12,9 @@ const newIds = [
   'merge-sort', 'prefix-sum', 'sliding-window', 'fenwick-tree', 'lis',
   'zero-one-bfs', 'binary-exponentiation', 'euclidean-gcd',
   'tuple-optional', 'bitset-switch',
+  'linked-list-reversal', 'bst-insertion', 'trie-prefix-count', 'huffman-tree',
+  'generic-insertion-sort', 'constexpr-factorial', 'postfix-evaluation',
+  'euclidean-gcd-goto', 'lcs-string-table',
 ];
 
 describe('catálogo de técnicas em C++ puro', () => {

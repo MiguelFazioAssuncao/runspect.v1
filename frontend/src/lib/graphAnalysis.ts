@@ -77,9 +77,8 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     const queue = [node.id];
     visited.add(node.id);
     weakComponentOf.set(node.id, componentCount - 1);
-    while (queue.length) {
-      const current = queue.shift();
-      if (current === undefined) continue;
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
       weakAdjacency.get(current)?.forEach((neighbor) => {
         if (!visited.has(neighbor)) {
           visited.add(neighbor);
@@ -96,9 +95,8 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     if (colors.has(node.id)) return;
     colors.set(node.id, 0);
     const queue = [node.id];
-    while (queue.length) {
-      const current = queue.shift();
-      if (current === undefined) continue;
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
       weakAdjacency.get(current)?.forEach((neighbor) => {
         const expected = colors.get(current) === 0 ? 1 : 0;
         if (!colors.has(neighbor)) {
@@ -118,21 +116,6 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
   const connected = nodes.length > 0 && componentCount === 1;
   const forest = !directed && edges.length === undirectedEdges.length
     && undirectedEdges.length === nodes.length - componentCount;
-  let cyclic = false;
-  if (directed) {
-    const state = new Map<number, 0 | 1 | 2>();
-    const visit = (node: number): boolean => {
-      state.set(node, 1);
-      for (const neighbor of adjacency.get(node) ?? []) {
-        if (state.get(neighbor) === 1 || (state.get(neighbor) !== 2 && visit(neighbor))) return true;
-      }
-      state.set(node, 2);
-      return false;
-    };
-    cyclic = nodes.some((node) => !state.has(node.id) && visit(node.id));
-  } else {
-    cyclic = edges.length !== undirectedEdges.length || !forest;
-  }
   const uniquePairs = new Set(
     edges.map((edge) => {
       const { source, target } = ids(edge);
@@ -160,9 +143,8 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
   const reachable = (graph: Map<number, number[]>, start: number) => {
     const seen = new Set<number>([start]);
     const queue = [start];
-    while (queue.length) {
-      const current = queue.shift();
-      if (current === undefined) continue;
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
       (graph.get(current) ?? []).forEach((neighbor) => {
         if (!seen.has(neighbor)) {
           seen.add(neighbor);
@@ -180,23 +162,40 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
 
   const finishOrder: number[] = [];
   const visitedDirected = new Set<number>();
-  const visitDirected = (node: number) => {
-    visitedDirected.add(node);
-    (adjacency.get(node) ?? []).forEach((neighbor) => {
-      if (!visitedDirected.has(neighbor)) visitDirected(neighbor);
-    });
-    finishOrder.push(node);
-  };
-  nodes.forEach((node) => {
-    if (!visitedDirected.has(node.id)) visitDirected(node.id);
+  // Explicit stacks keep deep user graphs independent of the JS call stack.
+  if (directed) nodes.forEach((node) => {
+    if (visitedDirected.has(node.id)) return;
+    const stack = [{ node: node.id, next: 0 }];
+    visitedDirected.add(node.id);
+    while (stack.length) {
+      const frame = stack[stack.length - 1];
+      const neighbors = adjacency.get(frame.node) ?? [];
+      if (frame.next === neighbors.length) {
+        finishOrder.push(frame.node);
+        stack.pop();
+      } else {
+        const neighbor = neighbors[frame.next++];
+        if (!visitedDirected.has(neighbor)) {
+          visitedDirected.add(neighbor);
+          stack.push({ node: neighbor, next: 0 });
+        }
+      }
+    }
   });
   const componentOf = new Map<number, number>();
   let stronglyConnectedComponents = 0;
   const visitReverse = (node: number) => {
     componentOf.set(node, stronglyConnectedComponents);
-    (reverse.get(node) ?? []).forEach((neighbor) => {
-      if (!componentOf.has(neighbor)) visitReverse(neighbor);
-    });
+    const stack = [node];
+    while (stack.length) {
+      const current = stack.pop()!;
+      for (const neighbor of reverse.get(current) ?? []) {
+        if (!componentOf.has(neighbor)) {
+          componentOf.set(neighbor, stronglyConnectedComponents);
+          stack.push(neighbor);
+        }
+      }
+    }
   };
   if (!directed) {
     weakComponentOf.forEach((component, node) => componentOf.set(node, component));
@@ -258,9 +257,8 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
       remaining.set(target, (remaining.get(target) ?? 0) + 1);
     });
     const queue = nodes.filter((node) => remaining.get(node.id) === 0).map((node) => node.id);
-    while (queue.length) {
-      const current = queue.shift();
-      if (current === undefined) continue;
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
       topologicalOrder.push(current);
       (adjacency.get(current) ?? []).forEach((neighbor) => {
         const degree = (remaining.get(neighbor) ?? 0) - 1;
@@ -270,6 +268,7 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     }
   }
   const topologicalCycle = directed && topologicalOrder.length !== nodes.length;
+  const cyclic = directed ? topologicalCycle : edges.length !== undirectedEdges.length || !forest;
 
   const bridgeAndArticulation = (() => {
     const graph = new Map<number, { node: number; edge: number }[]>();
@@ -285,26 +284,36 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     const articulation = new Set<number>();
     const bridges = new Set<number>();
     let time = 0;
-    const visit = (node: number, parentEdge: number | undefined) => {
-      discovery.set(node, ++time);
-      low.set(node, discovery.get(node)!);
-      let children = 0;
-      for (const next of graph.get(node) ?? []) {
-        if (next.edge === parentEdge) continue;
-        if (!discovery.has(next.node)) {
-          children++;
-          visit(next.node, next.edge);
-          low.set(node, Math.min(low.get(node)!, low.get(next.node)!));
-          if (parentEdge !== undefined && low.get(next.node)! >= discovery.get(node)!) articulation.add(node);
-          if (low.get(next.node)! > discovery.get(node)!) bridges.add(next.edge);
+    nodes.forEach((node) => {
+      if (discovery.has(node.id)) return;
+      type Frame = { node: number; parentEdge?: number; next: number; children: number };
+      const stack: Frame[] = [{ node: node.id, next: 0, children: 0 }];
+      discovery.set(node.id, ++time);
+      low.set(node.id, time);
+      while (stack.length) {
+        const frame = stack[stack.length - 1];
+        const neighbors = graph.get(frame.node) ?? [];
+        if (frame.next < neighbors.length) {
+          const next = neighbors[frame.next++];
+          if (next.edge === frame.parentEdge) continue;
+          if (discovery.has(next.node)) {
+            low.set(frame.node, Math.min(low.get(frame.node)!, discovery.get(next.node)!));
+          } else {
+            frame.children++;
+            discovery.set(next.node, ++time);
+            low.set(next.node, time);
+            stack.push({ node: next.node, parentEdge: next.edge, next: 0, children: 0 });
+          }
         } else {
-          low.set(node, Math.min(low.get(node)!, discovery.get(next.node)!));
+          stack.pop();
+          const parent = stack[stack.length - 1];
+          if (parent) {
+            low.set(parent.node, Math.min(low.get(parent.node)!, low.get(frame.node)!));
+            if (parent.parentEdge !== undefined && low.get(frame.node)! >= discovery.get(parent.node)!) articulation.add(parent.node);
+            if (low.get(frame.node)! > discovery.get(parent.node)!) bridges.add(frame.parentEdge!);
+          } else if (frame.children > 1) articulation.add(frame.node);
         }
       }
-      if (parentEdge === undefined && children > 1) articulation.add(node);
-    };
-    nodes.forEach((node) => {
-      if (!discovery.has(node.id)) visit(node.id, undefined);
     });
     return { bridges, articulation };
   })();
@@ -331,19 +340,35 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     colors.forEach((color, node) => {
       if (color === 0) left.add(node);
     });
-    const visit = (node: number, seen: Set<number>): boolean => {
-      for (const neighbor of adjacency.get(node) ?? []) {
+    const visit = (node: number): boolean => {
+      const freeNeighbor = (adjacency.get(node) ?? []).find(neighbor => !matching.has(neighbor));
+      if (freeNeighbor !== undefined) {
+        matching.set(freeNeighbor, node);
+        return true;
+      }
+      const seen = new Set<number>();
+      const stack: { node: number; next: number; via?: number }[] = [{ node, next: 0 }];
+      while (stack.length) {
+        const frame = stack[stack.length - 1];
+        const neighbors = adjacency.get(frame.node) ?? [];
+        if (frame.next === neighbors.length) {
+          stack.pop();
+          continue;
+        }
+        const neighbor = neighbors[frame.next++];
         if (seen.has(neighbor)) continue;
         seen.add(neighbor);
         const paired = matching.get(neighbor);
-        if (paired === undefined || visit(paired, seen)) {
-          matching.set(neighbor, node);
+        if (paired === undefined) {
+          matching.set(neighbor, frame.node);
+          for (let i = stack.length - 1; i > 0; i--) matching.set(stack[i].via!, stack[i - 1].node);
           return true;
         }
+        stack.push({ node: paired, next: 0, via: neighbor });
       }
       return false;
     };
-    left.forEach((node) => visit(node, new Set()));
+    left.forEach((node) => visit(node));
     matching.forEach((node, neighbor) => matchingPairs.push([node, neighbor]));
   }
 
@@ -440,7 +465,7 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     tree: !directed && connected && forest,
     forest,
     density: possibleEdges === 0 ? 0 : uniquePairs.size / possibleEdges,
-    maxDegree: Math.max(0, ...Array.from(adjacency.values(), (neighbors) => neighbors.length)),
+    maxDegree: Array.from(adjacency.values()).reduce((max, neighbors) => Math.max(max, neighbors.length), 0),
     weaklyConnected,
     stronglyConnected,
     stronglyConnectedComponents,
@@ -453,7 +478,7 @@ export function analyzeGraph(nodes: GraphNode[], edges: GraphEdge[], directed: b
     articulationNodeIds: directed ? [] : [...bridgeAndArticulation.articulation],
     matchingPairs,
     coloringByNode,
-    coloringCount: Math.max(0, ...Object.values(coloringByNode)) + (nodes.length ? 1 : 0),
+    coloringCount: Object.values(coloringByNode).reduce((max, color) => Math.max(max, color), 0) + (nodes.length ? 1 : 0),
     topologicalOrder,
     topologicalCycle,
     negativeCycleEdgeIndexes,

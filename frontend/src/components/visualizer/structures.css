@@ -91,3 +91,17 @@
   .structure-element { flex: 0 1 auto; }
   .structure-view .matrix-table td { min-width: 44px; font-size: 12px; }
 }
+.reference-view { min-width: 0; }
+.reference-roots { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0; font-size: 12px; }
+.reference-link { cursor: pointer; color: #93c5fd; text-decoration: underline; border-radius: 4px; }
+.reference-link:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+.reference-diagram-scroll { max-width: 100%; overflow: auto; max-height: 480px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; }
+.reference-object-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 8px; margin-top: 10px; }
+.reference-object { border: 1px solid #334155; border-radius: 8px; min-width: 0; padding: 8px; overflow-wrap: anywhere; font-size: 12px; }
+.reference-object summary { cursor: pointer; color: #cbd5e1; }
+.reference-object dl { display: grid; gap: 4px; margin-top: 8px; }
+.reference-object dl > div { display: flex; justify-content: space-between; gap: 10px; }
+.reference-object dd { text-align: right; min-width: 0; white-space: pre-wrap; }
+.reference-object-released { border-color: #ef4444; }
+.reference-object-unobserved { border-style: dashed; }
+.call-entry-threw { border-color: #ef4444; }

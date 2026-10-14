@@ -43,6 +43,30 @@ export const isWeighted = (steps: TraceStep[], upTo = steps.length - 1): boolean
 export const isMulti = (steps: TraceStep[], upTo = steps.length - 1): boolean =>
   flagAt(steps, 'SET_MULTI', 'multi', false, upTo);
 
+export function createGraphFlagIndex(steps: TraceStep[]) {
+  const initial = { directed: true, weighted: true, multi: false };
+  const changes: { index: number; flags: typeof initial }[] = [];
+  let flags = initial;
+  steps.forEach((step, index) => {
+    const field = step.step_event === 'SET_DIRECTED' ? 'directed'
+      : step.step_event === 'SET_WEIGHTED' ? 'weighted'
+        : step.step_event === 'SET_MULTI' ? 'multi' : null;
+    if (field && typeof step.data?.[field] === 'boolean') {
+      flags = { ...flags, [field]: step.data[field] };
+      changes.push({ index, flags });
+    }
+  });
+  return (upTo: number) => {
+    let lo = 0, hi = changes.length;
+    while (lo < hi) {
+      const mid = lo + Math.floor((hi - lo) / 2);
+      if (changes[mid].index <= upTo) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo ? changes[lo - 1].flags : initial;
+  };
+}
+
 export const frameEnds = (steps: TraceStep[]): number[] => {
   const ends: number[] = [];
   steps.forEach((s, i) => {
@@ -61,8 +85,6 @@ export const frameCaption = (steps: TraceStep[], eventIndex: number): string => 
 const isNodePath = (value: unknown): value is number[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'number' && Number.isInteger(item));
 
-// One accumulator per player/session, retaining only current state. Backward seeks
-// and flag changes rebuild, preserving the original full-prefix semantics.
 export function createGraphReplay(steps: TraceStep[]) {
   let last = -1;
   let directed = true;

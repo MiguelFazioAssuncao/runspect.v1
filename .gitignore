@@ -1,4 +1,5 @@
 frontend/node_modules/
+/node_modules/
 frontend/.next/
 frontend/.env*
 frontend/*.tsbuildinfo
@@ -6,6 +7,9 @@ frontend/.git.history/
 frontend/coverage/
 frontend/out/
 frontend/build/
+frontend/public/monaco/
 *.log
 backend/.runtime/
 **/__pycache__/
+.opencode/
+graphify-out/

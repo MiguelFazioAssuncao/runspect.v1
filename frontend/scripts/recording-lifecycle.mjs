@@ -1,3 +1,4 @@
+import { confirmAllVisualizations, mockVisualizationAnalysis } from './browser-selection.mjs';
 // Same PLAYWRIGHT_MODULE/CHROMIUM/RUNSPECT_URL options as recording-browser.mjs.
 import assert from 'node:assert/strict';
 import { writeFile, mkdir } from 'node:fs/promises';
@@ -24,6 +25,7 @@ await page.addInitScript(() => {
   XMLSerializer.prototype.serializeToString=function(node){if(window.recTest.fault==='capture')throw new Error('injected capture failure');return serialize.call(this,node);};
 });
 let count=80;
+await mockVisualizationAnalysis(page, () => [{step_event:'VECTOR_INIT'}]);
 await page.route('**/api/run',route=>{
  const steps=[{step:0,step_event:'VECTOR_INIT',data:{name:'a',values:[4,3,2,1]}}];
  for(let i=0;i<count;i++)steps.push({step:steps.length,step_event:'VECTOR_COMPARE',data:{name:'a',a:i%3,b:i%3+1}},{step:steps.length+1,step_event:'VECTOR_STEP',data:{name:'a',line:i%4+1}});
@@ -32,7 +34,7 @@ await page.route('**/api/run',route=>{
 await page.route('https://cdn.jsdelivr.net/**',route=>route.abort());
 await page.goto(process.env.RUNSPECT_URL || 'http://localhost:3000');
 await page.addStyleTag({content:'nextjs-portal {display:none!important}'});
-async function run(){await page.getByRole('button',{name:'Executar Algoritmo'}).click();await page.waitForFunction(n=>document.querySelector('.timeline-step')?.textContent.includes(`/ ${n}`),count);}
+async function run(){await page.getByRole('button',{name:'Executar Algoritmo'}).click(); await confirmAllVisualizations(page);await page.waitForFunction(n=>document.querySelector('.timeline-step')?.textContent.includes(`/ ${n}`),count);}
 async function start(fault=''){await page.evaluate(fault=>{window.recTest.fault=fault;window.recTest.created=0;window.recTest.outputs=0;},fault);await page.getByRole('button',{name:'Gravar',exact:true}).click();}
 async function settled(){await page.waitForFunction(()=>/recording-status-(done|error)/.test(document.querySelector('.recording-status')?.className||''));await page.waitForFunction(()=>!document.querySelector('.recording-stage'));assert.equal(await page.getByLabel('Posição na linha do tempo').isEnabled(),true);const resources=await page.evaluate(()=>window.recTest);assert.equal(resources.encoders,0);assert.equal(resources.frames,0);return page.locator('.recording-status').innerText();}
 const results=[];

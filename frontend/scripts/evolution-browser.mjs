@@ -1,3 +1,4 @@
+import { confirmAllVisualizations, mockVisualizationAnalysis } from './browser-selection.mjs';
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/evolution-browser.mjs
 // Executes trusted repository fixtures with the real instrumenter and mounts the
 // application in Vite. Monaco is replaced by an editable textarea in this harness.
@@ -13,7 +14,7 @@ import { createServer } from 'vite';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = fileURLToPath(new URL('../', import.meta.url));
 const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
-const output = process.env.EVOLUTION_OUTPUT || fileURLToPath(new URL('../../docs/evidencias/', import.meta.url));
+const output = process.env.EVOLUTION_OUTPUT || join(tmpdir(), 'runspect-evidencias');
 const temporary = await mkdtemp(join(tmpdir(), 'runspect-evolution-browser-'));
 const entry = 'virtual:evolution-browser.tsx';
 const fixture = await readFile(join(backend, 'internal/runner/testdata/kuhn_difference.cpp'), 'utf8');
@@ -112,6 +113,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   let selected = 0;
   await page.route('**/healthz', route => route.fulfill({ json: { status: 'ok' } }));
+  await mockVisualizationAnalysis(page, () => traces[selected].steps);
   await page.route('**/api/run', route => route.fulfill({ json: traces[selected] }));
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
   await page.getByLabel('Código C++ da verificação').fill(fixture);
@@ -122,7 +124,7 @@ try {
   };
   for (const [index, label] of [[0, 'obrigatório'], [1, 'caminho aumentante']]) {
     selected = index;
-    await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+    await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click(); await confirmAllVisualizations(page);
     await waitForTrace(index);
     const timeline = page.getByLabel('Posição na linha do tempo');
     await timeline.waitFor();
@@ -139,7 +141,7 @@ try {
   }
   selected = 2;
   await page.getByLabel('Código C++ da verificação').fill(structures);
-  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click(); await confirmAllVisualizations(page);
   await waitForTrace(2);
   await page.getByLabel('Posição na linha do tempo').press('End');
   await page.locator('.visualizer-column:not(.recording-stage) .timeline-completed').waitFor();
