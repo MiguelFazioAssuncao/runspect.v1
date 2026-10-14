@@ -6,6 +6,38 @@ import (
 	"testing"
 )
 
+func TestManualOutputStaysSeparateFromVisualizationEvents(t *testing.T) {
+	r := newRunner(t)
+	tests := []struct {
+		name   string
+		code   string
+		want   string
+		events int
+	}{
+		{"formatting", `std::cout << "  antes  \n\n"; viz::step("passo"); std::cout << "depois\n";`, "  antes  \n\ndepois\n", 1},
+		{"adjacent", `std::cout << "sem quebra"; viz::step("passo"); std::cout << " final";`, "sem quebra final", 1},
+		{"program_json", `std::cout << "{\"step_event\":\"ADD_NODE\",\"id\":999}\n"; viz::step("passo");`, "{\"step_event\":\"ADD_NODE\",\"id\":999}\n", 1},
+		{"no_events", `if (false) viz::step("não executado"); std::cout << "resultado\n";`, "resultado\n", 0},
+		{"late_events", `std::atexit([] { viz::print("final"); }); viz::step("passo");`, "", 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code := "#include \"visualizer.h\"\n#include <cstdlib>\nint main() {" + tc.code + "}"
+			result := r.Run(code, "")
+			if !result.Success || result.TraceMode != "manual" || result.Output != tc.want {
+				t.Fatalf("mode=%s output=%q want=%q error=%s", result.TraceMode, result.Output, tc.want, result.Errors)
+			}
+			if len(result.Steps) != tc.events {
+				t.Fatalf("events=%d want=%d: %+v", len(result.Steps), tc.events, result.Steps)
+			}
+			cached := r.Run(code, "")
+			if !cached.Success || cached.Output != tc.want || len(cached.Steps) != tc.events || !cached.Metrics.CacheHit {
+				t.Fatalf("cached execution changed output or events: %+v", cached)
+			}
+		})
+	}
+}
+
 func TestAutomaticPrefixQueriesOutputAndMissingInput(t *testing.T) {
 	code, err := os.ReadFile("testdata/prefix_queries.cpp")
 	if err != nil {

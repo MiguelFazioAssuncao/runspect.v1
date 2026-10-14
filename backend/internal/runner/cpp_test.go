@@ -254,8 +254,8 @@ int main() {
 	if len(res.Steps) != 1 {
 		t.Errorf("esperava 1 evento, veio %d", len(res.Steps))
 	}
-	if res.Output != "texto solto" {
-		t.Errorf("stdout = %q, esperava texto solto", res.Output)
+	if res.Output != "texto solto\n" {
+		t.Errorf("stdout = %q, esperava texto solto com quebra de linha", res.Output)
 	}
 }
 

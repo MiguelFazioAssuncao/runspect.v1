@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Activity, CircleHelp, Clock3, Network } from 'lucide-react';
+import { Activity, CircleHelp, Clock3, Network, SlidersHorizontal } from 'lucide-react';
+import { LearningPanel } from '@/components/LearningPanel';
+import { StudyPaths } from '@/components/StudyPaths';
+import type { SampleRun } from '@/components/LearningPanel';
+import { useStudyProject } from '@/hooks/useStudyProject';
+import { MAX_PROJECT_BYTES, normalizeSearch, parseStudyProject, serializeStudyProject, validateProgram } from '@/lib/studyProject';
+import type { ProgramDraft } from '@/lib/studyProject';
 import { WorkspaceSplit } from '@/components/workspace/WorkspaceSplit';
 import { PanelInteractionContext, ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { flushSync } from 'react-dom';
@@ -20,19 +26,24 @@ import { StructsPanel } from '@/components/visualizer/StructsPanel';
 import { ProgramConsole } from '@/components/visualizer/ProgramConsole';
 import { VectorSortPanel } from '@/components/visualizer/VectorSortPanel';
 import { GraphAnalysisPanel } from '@/components/visualizer/GraphAnalysisPanel';
+import { VisualizationPicker } from '@/components/visualizer/VisualizationPicker';
+import { DEFAULT_VISUALIZATION_SELECTION, selectVisualizationContent, traceVisualizationKeys, visualizationSelectionLabel } from '@/lib/visualizationSelection';
+import type { VisualizationKey, VisualizationSelection } from '@/lib/visualizationSelection';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { useVisualizerPlayer } from '@/hooks/useVisualizerPlayer';
 import { examples } from '@/lib/examples';
-import { DEFAULT_CPP_CODE } from '@/lib/cppTemplate';
 import { convertToPureCpp } from '@/lib/codeConversion';
-import { exportJson } from '@/lib/export';
+import { downloadFile, exportJson } from '@/lib/export';
 import { terminalOutput } from '@/lib/terminalOutput';
+import { runspectApiUrl } from '@/lib/runspectApiUrl';
 import { captureSvgSnapshot, DEFAULT_SVG_OPTIONS } from '@/lib/svgExport';
 import type { SvgExportOptions, SvgSnapshot } from '@/lib/svgExport';
 import { boundedOperation, createRecordingPlan, recordVisualization, RecordingStopped, RECORDING_BG, throwIfRecordingAborted } from '@/lib/recording';
 import type { RecordingPlan, RecordingStatus } from '@/lib/recording';
 import { captureFontCSS } from '@/lib/captureFonts';
 import type { ExecutionResult, TraceStep } from '@/types/visualizer';
+import { TRACE_PRESETS } from '@/lib/traceLimits';
+import type { TracePreset } from '@/lib/traceLimits';
 
 type PlayerState = ReturnType<typeof useVisualizerPlayer>;
 const NO_STEPS: TraceStep[] = [];
@@ -44,6 +55,8 @@ interface RecordingStage {
   layout: GraphLayout;
   runId: number;
   index: number;
+  selection: VisualizationSelection;
+  fallbackOutput: string;
 }
 interface RecordingSession {
   stop: AbortController;
@@ -53,11 +66,10 @@ interface RecordingSession {
 type ExampleItem = (typeof examples)[number];
 
 const filterExamples = (query: string, category: string): ExampleItem[] => {
-  const normalizedQuery = query.toLocaleLowerCase();
+  const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
   return examples.filter((example) => {
-    const matchesQuery = `${example.name} ${example.description ?? ''} ${(example.tags ?? []).join(' ')}`
-      .toLocaleLowerCase()
-      .includes(normalizedQuery);
+    const searchable = normalizeSearch(`${example.name} ${example.description} ${example.tags.join(' ')}`);
+    const matchesQuery = terms.every(term => searchable.includes(term));
     return matchesQuery && (category === 'todas' || (example.category ?? 'Outros') === category);
   });
 };
@@ -67,11 +79,13 @@ interface VisualizationStageProps {
   layout: GraphLayout;
   runId: number;
   hasSteps: boolean;
+  selection: VisualizationSelection;
+  fallbackOutput?: string;
   graphRef?: React.Ref<GraphCanvasHandle>;
   staticRender?: boolean;
 }
 
-const VisualizationStage = React.memo(function VisualizationStage({ player, layout, runId, hasSteps, graphRef, staticRender = false }: VisualizationStageProps) {
+const VisualizationStage = React.memo(function VisualizationStage({ player, layout, runId, hasSteps, selection, fallbackOutput = '', graphRef, staticRender = false }: VisualizationStageProps) {
   const analysisKey = JSON.stringify({
     directed: player.directed,
     nodes: player.graphState.nodes.map(node => ({ id: node.id, label: node.label })),
@@ -79,24 +93,21 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   });
   const graphAnalysis = useMemo(() => {
     const topology = JSON.parse(analysisKey) as { directed: boolean; nodes: PlayerState['graphState']['nodes']; edges: PlayerState['graphState']['edges'] };
-    return topology.nodes.length ? analyzeGraph(topology.nodes, topology.edges, topology.directed) : null;
-  }, [analysisKey]);
+    return topology.nodes.length && (selection.graph || selection.analysis) ? analyzeGraph(topology.nodes, topology.edges, topology.directed) : null;
+  }, [analysisKey, selection.graph, selection.analysis]);
   const flowSummary = useMemo(() => {
     const message = [...player.logs].reverse().find((log) => /Fluxo:\s*\d+,\s*custo:\s*-?\d+/i.test(log));
     const match = message?.match(/Fluxo:\s*(\d+),\s*custo:\s*(-?\d+)/i);
     return match ? { flow: Number(match[1]), cost: Number(match[2]) } : null;
   }, [player.logs]);
 
-  const hasGraph = player.graphState.nodes.length > 0;
-  const hasVectors = player.vectors.length > 0;
-  const visibleStructs = player.structs.filter(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0));
-  const hasStructs = visibleStructs.length > 0 || player.matrices.length > 0 || player.calls.length > 0;
-  const hasVisualization = hasGraph || hasVectors || hasStructs;
-  const hasProgramConsole = !!player.programConsole.output || player.programConsole.warnings.length > 0;
+  const consoleOutput = player.programConsole.output || (player.totalSteps === 0 || player.currentStepIndex === player.totalSteps - 1 ? fallbackOutput : '');
+  const { hasGraph, hasVectors, hasStructs, hasVisualization, hasConsole, hasAnalysis, hasContent, structs: visibleStructs, matrices, calls, references } = selectVisualizationContent({ ...player, programConsole: { ...player.programConsole, output: consoleOutput } }, selection);
+  const hasSelection = Object.values(selection).some(Boolean);
 
   return (
     <PanelInteractionContext.Provider value={!staticRender}>
-      {!hasGraph && player.caption && <ResizablePanel title="Descrição do passo"><div className="frame-caption frame-caption-inline" role="status">{player.caption}</div></ResizablePanel>}
+      {!hasGraph && hasVisualization && player.caption && <ResizablePanel title="Descrição do passo"><div className="frame-caption frame-caption-inline" role="status">{player.caption}</div></ResizablePanel>}
       <div className={`graph-stage ${!hasGraph && hasVisualization ? 'graph-stage-data-only' : ''} ${hasVectors && !hasGraph ? 'graph-stage-vector-only' : ''}`}>
         {hasGraph && (
           <ResizablePanel title="Grafo" className="graph-workspace" fill>
@@ -122,43 +133,64 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
           </div>
           </ResizablePanel>
         )}
-        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={player.matrices} calls={player.calls} primary solo={!hasVectors} />}
-        <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />
-        {!hasVisualization && hasProgramConsole && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
-        {!hasVisualization && !hasProgramConsole && (
+        {!hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} references={references} primary solo={!hasVectors} />}
+        {hasVectors && <VectorSortPanel vectors={player.vectors} issues={player.vectorIssues} solo={!hasGraph} />}
+        {hasConsole && <ProgramConsole output={consoleOutput} warnings={player.programConsole.warnings} />}
+        {!hasContent && (
           <div className="graph-panel">
             <div className="graph-empty-state">
               <Network className="h-8 w-8" />
-              {!hasSteps ? (
+              {!hasSelection ? (
                 <>
-                  <strong>Nenhuma visualização para exibir</strong>
-                  <span>Execute o algoritmo para visualizar os passos.</span>
+                  <strong>Somente o terminal está ativo</strong>
+                  <span>Use “Alterar visualizações” para escolher painéis.</span>
+                </>
+              ) : !hasSteps ? (
+                <>
+                  <strong>Escolha o que acompanhar</strong>
+                  <span>Ao executar, selecione as visualizações desejadas.</span>
                 </>
               ) : (
                 <>
-                  <strong>Nenhum dado visual neste passo</strong>
-                  <span>Avance na linha do tempo para acompanhar o algoritmo.</span>
+                  <strong>Nenhum dado dos painéis selecionados neste passo</strong>
+                  <span>Avance na linha do tempo ou altere as visualizações.</span>
                 </>
               )}
             </div>
           </div>
         )}
-        {hasGraph && <ResizablePanel title="Legenda"><GraphLegend /></ResizablePanel>}
+        {hasGraph && selection.legend && <ResizablePanel title="Legenda"><GraphLegend /></ResizablePanel>}
+        {hasAnalysis && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
       </div>
-      {!staticRender && <GraphAnalysisPanel analysis={graphAnalysis} flowSummary={flowSummary} />}
-      {hasGraph && <StructsPanel structs={player.structs} matrices={player.matrices} calls={player.calls} />}
-      {hasVisualization && <ProgramConsole output={player.programConsole.output} warnings={player.programConsole.warnings} />}
+      {hasGraph && hasStructs && <StructsPanel structs={visibleStructs} matrices={matrices} calls={calls} references={references} />}
     </PanelInteractionContext.Provider>
   );
-}, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
-  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
+}, (previous, next) => previous.layout === next.layout && previous.runId === next.runId && previous.hasSteps === next.hasSteps && previous.selection === next.selection && previous.fallbackOutput === next.fallbackOutput && previous.graphRef === next.graphRef && previous.staticRender === next.staticRender &&
+  (!next.fallbackOutput || (previous.player.currentStepIndex === next.player.currentStepIndex && previous.player.totalSteps === next.player.totalSteps)) &&
+  (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'references', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
-  const [code, setCode] = useState(DEFAULT_CPP_CODE);
-  const [customCode, setCustomCode] = useState(DEFAULT_CPP_CODE);
-  const [stdin, setStdin] = useState(examples[0].stdin ?? '');
-  const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
+  const { project, status: saveStatus, error: saveError, updateProject } = useStudyProject();
   const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
+  const selectedExample = examples.find(example => example.id === selectedExampleId) ?? examples[0];
+  const exampleDraft = project.exampleDrafts?.[selectedExampleId] ?? selectedExample;
+  const [tracePreset, setTracePreset] = useState<TracePreset>('standard');
+  const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
+  const code = editorTab === 'custom' ? project.code : exampleDraft.code;
+  const stdin = editorTab === 'custom' ? project.stdin : exampleDraft.stdin;
+  const editExample = (update: Partial<ProgramDraft>) => {
+    const draft = { code: exampleDraft.code, stdin: exampleDraft.stdin, ...update };
+    const exampleDrafts = { ...project.exampleDrafts };
+    if (draft.code === selectedExample.code && draft.stdin === selectedExample.stdin) delete exampleDrafts[selectedExampleId];
+    else exampleDrafts[selectedExampleId] = draft;
+    updateProject({ exampleDrafts });
+  };
+  const setCode = (value: string) => editorTab === 'custom' ? updateProject({ code: value }) : editExample({ code: value });
+  const setStdin = (value: string) => editorTab === 'custom' ? updateProject({ stdin: value }) : editExample({ stdin: value });
+  const [projectNotice, setProjectNotice] = useState('');
+  const [sampleRun, setSampleRun] = useState<SampleRun | null>(null);
+  const [executedCode, setExecutedCode] = useState('');
+  const [executedInput, setExecutedInput] = useState('');
   const [exampleQuery, setExampleQuery] = useState('');
   const [exampleCategory, setExampleCategory] = useState('todas');
   const [conversionNotice, setConversionNotice] = useState('');
@@ -170,6 +202,8 @@ export default function Home() {
   const [hasError, setHasError] = useState(false);
   const [traceMode, setTraceMode] = useState<ExecutionResult['trace_mode']>();
   const [isLoading, setIsLoading] = useState(false);
+  const [visualizationSelection, setVisualizationSelection] = useState(DEFAULT_VISUALIZATION_SELECTION);
+  const [visualizationPicker, setVisualizationPicker] = useState<{ source: string; input: string; execute: boolean; available?: VisualizationKey[] } | null>(null);
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [fullscreen, setFullscreen] = useState(false);
@@ -192,6 +226,8 @@ export default function Home() {
   const recPlayerRef = useRef<PlayerState>(recPlayer);
   const recordingSessionRef = useRef<RecordingSession | null>(null);
   const runRequestRef = useRef(false);
+  const runControllerRef = useRef<AbortController | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
   const visibleAreaRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -211,8 +247,21 @@ export default function Home() {
 
   const selectExample = (example: ExampleItem) => {
     setSelectedExampleId(example.id);
-    setCode(example.code);
-    setStdin(example.stdin ?? '');
+  };
+
+  const openExample = (id: string) => {
+    const example = examples.find(item => item.id === id);
+    if (!example) return;
+    setExampleCategory('todas');
+    setExampleQuery('');
+    setEditorTab('examples');
+    selectExample(example);
+  };
+
+  const restoreExample = () => {
+    const exampleDrafts = { ...project.exampleDrafts };
+    delete exampleDrafts[selectedExampleId];
+    updateProject({ exampleDrafts });
   };
 
   const changeExampleCategory = (category: string) => {
@@ -229,10 +278,8 @@ export default function Home() {
     }
   };
 
-  const hasGraph = player.graphState.nodes.length > 0;
-  const hasVectors = player.vectors.length > 0;
-  const hasStructs = player.structs.some(struct => struct.name !== 'Execução' && (struct.name !== 'Variáveis' || struct.items.length > 0)) || player.matrices.length > 0 || player.calls.length > 0;
-  const hasVisualization = hasGraph || hasVectors || hasStructs;
+  const { hasGraph, hasContent } = selectVisualizationContent(player, visualizationSelection);
+  const hasVisualization = hasContent || (visualizationSelection.output && !!untracedOutput);
 
   const playbackCompleted = player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1;
   const terminalText = isLoading || hasError || steps.length === 0
@@ -247,7 +294,7 @@ export default function Home() {
       const timeout = window.setTimeout(() => controller.abort(), 3000);
 
       try {
-        const response = await fetch('/healthz', {
+        const response = await fetch(runspectApiUrl('/healthz'), {
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -291,6 +338,7 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
+      runControllerRef.current?.abort();
       recordingSessionRef.current?.dispose.abort(new Error('A página de gravação foi fechada.'));
       recordingSessionRef.current = null;
     };
@@ -360,7 +408,7 @@ export default function Home() {
     let snapshotCapture: RecordingCapture | undefined;
 
     try {
-      flushSync(() => setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId, index: 0 }));
+      flushSync(() => setRecordingStage({ w: rect.width, h: rect.height, plan, steps, layout, runId, index: 0, selection: visualizationSelection, fallbackOutput: untracedOutput }));
       const result = await recordVisualization({
         plan,
         stop: session.stop.signal,
@@ -368,8 +416,6 @@ export default function Home() {
         onStatus: (status) => { if (activeSession()) setRecording(status); },
         capture: async (step, signals) => {
           throwIfRecordingAborted(signals);
-          // Commit both the requested frame and the graph layout before reading DOM.
-          // No animation-frame wait: background tabs must be able to export too.
           const renderStart = performance.now();
           flushSync(() => setRecordingStage(current => current && ownsSession() ? { ...current, index: step } : current));
           performance.measure('recording:render', { start: renderStart });
@@ -398,9 +444,7 @@ export default function Home() {
       link.href = url;
       link.download = filename;
       document.body.appendChild(link);
-      try { link.click(); } catch {
-        // The explicit download link remains available if auto-download is blocked.
-      } finally { link.remove(); }
+      try { link.click(); } catch {} finally { link.remove(); }
       const codecNotice = result.codec === 'avc' ? '' : ` Codec ${result.codec.toUpperCase()}: a compatibilidade com outros aplicativos pode variar.`;
       setRecording({
         phase: 'done', progress: 1,
@@ -424,17 +468,24 @@ export default function Home() {
   const runCode = async (source = code, input = stdin) => {
     if (recordingSessionRef.current || runRequestRef.current) return;
     runRequestRef.current = true;
+    const controller = new AbortController();
+    runControllerRef.current = controller;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 120_000);
     player.setIsPlaying(false);
     setSteps([]);
     setUntracedOutput('');
     setIsLoading(true);
     setHasError(false);
+    setTraceMode(undefined);
+    setSampleRun(null);
     setOutput('Compilando e executando...');
     try {
-      const response = await fetch('/api/run', {
+      const response = await fetch(runspectApiUrl('/api/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: source, stdin: input }),
+        signal: controller.signal,
+        body: JSON.stringify({ code: source, stdin: input, trace_options: { max_steps: TRACE_PRESETS[tracePreset].max_steps, max_items: TRACE_PRESETS[tracePreset].max_items } }),
       });
       const responseText = await response.text();
       let result: Partial<ExecutionResult> & { error?: string };
@@ -443,44 +494,78 @@ export default function Home() {
       } catch {
         throw new Error(
           response.status === 502 || response.status === 504
-            ? 'O frontend não conseguiu alcançar o backend. Inicie o servidor Go ou configure RUNSPECT_API_URL.'
+            ? 'O servidor de execução está indisponível no momento. Aguarde alguns instantes e tente novamente.'
             : `O servidor retornou uma resposta inválida (HTTP ${response.status}).`,
         );
       }
+      if (controller.signal.aborted) return;
+      setBackendStatus('connected');
       setTraceMode(result.trace_mode);
       setRunId((id) => id + 1);
+      const capturedSteps = result.steps ?? [];
+      const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
+      setExecutedCode(source);
+      setExecutedInput(input);
+      setSteps(capturedSteps);
+      setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
       if (!response.ok || !result.success) {
-        setSteps([]);
         setHasError(true);
-        const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
-        setOutput(`${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`);
+        setOutput(terminalOutput(result.output ?? '', `${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`, true));
       } else {
-        setSteps(result.steps ?? []);
-        setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
-        const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
-        setOutput(`Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`);
+        if (editorTab === 'examples') setSampleRun({ exampleId: selectedExampleId, code: source, stdin: input, output: result.output ?? '' });
+        const status = `Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`;
+        setOutput(capturedSteps.length ? status : terminalOutput(result.output ?? '', status, true));
       }
     } catch (error) {
+      if (controller.signal.aborted) {
+        setHasError(timedOut);
+        setOutput(timedOut ? 'O servidor demorou mais que o esperado. Tente novamente com uma entrada menor.' : 'Execução cancelada. Seu código foi preservado.');
+        return;
+      }
       setHasError(true);
       if (error instanceof TypeError) {
         setBackendStatus('disconnected');
-        setOutput(`Não foi possível conectar ao servidor de execução. Verifique se o backend Go está rodando em http://127.0.0.1:8080. (${error.message || 'falha de rede'})`);
+        setOutput('Não foi possível conectar ao servidor de execução. Seu código está disponível no editor. Verifique sua conexão e tente novamente em alguns instantes.');
       } else {
         setOutput(error instanceof Error ? error.message : 'Não foi possível executar o código.');
       }
     } finally {
+      window.clearTimeout(timeout);
+      runControllerRef.current = null;
       runRequestRef.current = false;
       setIsLoading(false);
     }
   };
 
+  const requestRun = (source = code, input = stdin) => {
+    if (recordingSessionRef.current || runRequestRef.current) return;
+    try {
+      validateProgram(source, input);
+      if (!source.trim()) throw new Error('Escreva um programa C++ antes de executar.');
+    } catch (error) {
+      setHasError(true);
+      setOutput(error instanceof Error ? error.message : 'Código inválido.');
+      return;
+    }
+    setVisualizationPicker({ source, input, execute: true });
+  };
+
   const loadDocumentationExample = (method: DocumentationMethod, execute: boolean) => {
-    setCode(method.example);
-    setCustomCode(method.example);
-    setStdin(method.stdin ?? '');
+    updateProject({ code: method.example, stdin: method.stdin ?? '' });
     setEditorTab('custom');
-    if (execute) void runCode(method.example, method.stdin ?? '');
+    if (execute) requestRun(method.example, method.stdin ?? '');
     setShowDocumentation(false);
+  };
+
+  const importProject = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (file.size > MAX_PROJECT_BYTES) throw new Error('O projeto excede 512 KiB.');
+      const imported = parseStudyProject(await file.text());
+      updateProject({ ...imported, exampleDrafts: imported.exampleDrafts ?? {} });
+      setEditorTab('custom');
+      setProjectNotice('Projeto aberto. Código, entrada, rascunhos e progresso foram restaurados.');
+    } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível abrir o projeto.'); }
   };
 
   const handleExportSvg = () => {
@@ -500,7 +585,13 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <div className="flex items-center gap-3">
-          <div className="brand-mark"><Network className="h-4 w-4" /></div>
+          <div className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" className="h-5 w-5">
+              <path d="M21 47V17h13a10 10 0 0 1 0 20H21m13 0 11 10" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6" />
+              <circle cx="21" cy="17" r="3" fill="#22d3ee" />
+              <circle cx="45" cy="47" r="3" fill="#60a5fa" />
+            </svg>
+          </div>
           <div><p className="brand-name">RUNSPECT</p><p className="brand-subtitle">algorithms lab</p></div>
         </div>
         <div className="topbar-context">
@@ -511,34 +602,38 @@ export default function Home() {
       </header>
 
       <section className="workspace-heading">
-        <div><p className="section-kicker">Interactive execution workspace</p><h1>Observe the algorithm, step by step.</h1></div>
+        <div><p className="section-kicker">Laboratório de programação competitiva</p><h1>Entenda cada passo do algoritmo.</h1></div>
         <div className="run-state"><Activity className="h-3.5 w-3.5" /> {isLoading ? 'executando' : 'pronto para executar'}</div>
       </section>
 
       <WorkspaceSplit>
         <div className="editor-column">
           <div className="editor-header">
-            <div className="editor-tabs" role="tablist" aria-label="Fonte do código">
+            <div className="editor-tabs" role="tablist" aria-label="Fonte do código" onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const tab = event.key === 'Home' ? 'custom' : event.key === 'End' ? 'examples' : editorTab === 'custom' ? 'examples' : 'custom';
+              setEditorTab(tab);
+              event.currentTarget.querySelector<HTMLButtonElement>(`#source-tab-${tab}`)?.focus();
+            }}>
               <button
                 className={`editor-tab ${editorTab === 'custom' ? 'editor-tab-active' : ''}`}
-                onClick={() => {
-                  setCode(customCode);
-                  setEditorTab('custom');
-                }}
+                onClick={() => setEditorTab('custom')}
                 role="tab"
+                id="source-tab-custom"
+                aria-controls="source-workspace"
+                tabIndex={editorTab === 'custom' ? 0 : -1}
                 aria-selected={editorTab === 'custom'}
               >
                 seu código
               </button>
               <button
                 className={`editor-tab ${editorTab === 'examples' ? 'editor-tab-active' : ''}`}
-                onClick={() => {
-                  const example = examples.find((item) => item.id === selectedExampleId) ?? examples[0];
-                  setCode(example.code);
-                  setStdin(example.stdin ?? '');
-                  setEditorTab('examples');
-                }}
+                onClick={() => setEditorTab('examples')}
                 role="tab"
+                id="source-tab-examples"
+                aria-controls="source-workspace"
+                tabIndex={editorTab === 'examples' ? 0 : -1}
                 aria-selected={editorTab === 'examples'}
               >
                 técnicas
@@ -560,22 +655,24 @@ export default function Home() {
                   aria-label="Selecionar técnica de programação competitiva"
                 >
                   {visibleExamples.length === 0 && <option value="">nenhuma técnica encontrada</option>}
-                  {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+                  {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{project.completed.includes(ex.id) ? '✓ ' : ''}{ex.name}</option>)}
                 </select>
               </div>
             )}
           </div>
+          <div id="source-workspace" role="tabpanel" aria-labelledby={`source-tab-${editorTab}`} className="editor-tab-panel">
+          <StudyPaths completed={project.completed} onSelect={openExample} />
+          {editorTab === 'examples' && visibleExamples.length === 0 && <div className="example-empty" role="status">
+            <span>Nenhuma técnica corresponde aos filtros.</span>
+            <button type="button" onClick={() => { setExampleQuery(''); setExampleCategory('todas'); }}>Limpar filtros</button>
+          </div>}
           {editorTab === 'examples' && (() => {
             const example = examples.find((item) => item.id === selectedExampleId);
             if (!example) return null;
-            return (
-              <div className="example-info">
-                <strong>{example.name}</strong>
-                <span>{example.description}</span>
-                <small>{example.category} · {example.timeComplexity} · memória {example.memoryComplexity} · {(example.tags ?? []).join(' · ')}</small>
-                <button type="button" onClick={() => { setCode(example.code); setStdin(example.stdin ?? ''); }}>restaurar exemplo</button>
-              </div>
-            );
+            return <LearningPanel example={example} code={code} stdin={stdin} sampleRun={sampleRun} completed={project.completed}
+              onRestore={restoreExample}
+              onComplete={() => updateProject({ completed: project.completed.includes(example.id) ? project.completed.filter(id => id !== example.id) : [...project.completed, example.id] })}
+              onSelect={openExample} />;
           })()}
           {editorTab === 'custom' && (
             <div className="editor-actions">
@@ -584,14 +681,8 @@ export default function Home() {
                 className="convert-button"
                 onClick={() => {
                   try {
-                    const converted = convertToPureCpp(customCode);
-                    const blob = new Blob([converted], { type: 'text/x-c++src;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = 'solucao.cpp';
-                    link.click();
-                    URL.revokeObjectURL(url);
+                    const converted = convertToPureCpp(project.code);
+                    downloadFile(new Blob([converted], { type: 'text/x-c++src;charset=utf-8' }), 'solucao.cpp');
                     setConversionNotice('Arquivo solucao.cpp baixado com C++ puro.');
                   } catch (error) {
                     setConversionNotice(error instanceof Error ? error.message : 'Falha na conversão.');
@@ -605,19 +696,32 @@ export default function Home() {
               {conversionNotice && <span className="conversion-notice" role="status">{conversionNotice}</span>}
             </div>
           )}
+          <div className="project-actions">
+            <span role="status">{saveStatus === 'saving' ? 'Salvando…' : saveStatus === 'unavailable' ? saveError ? `Não foi possível salvar. ${saveError}` : 'Não foi possível salvar neste navegador. Baixe o projeto para guardar suas alterações.' : saveStatus === 'recovered' ? 'Não foi possível recuperar o rascunho salvo.' : editorTab === 'custom' ? 'Código e entrada salvos neste navegador' : 'Rascunhos das técnicas salvos neste navegador'}</span>
+            <button type="button" onClick={() => {
+              try {
+                validateProgram(code, stdin);
+                downloadFile(new Blob([serializeStudyProject({ ...project, code, stdin })], { type: 'application/json;charset=utf-8' }), 'runspect-projeto.json');
+                setProjectNotice('Projeto baixado com código, entrada, rascunhos e progresso.');
+              } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível baixar o projeto.'); }
+            }}>Baixar projeto</button>
+            <button type="button" onClick={() => importRef.current?.click()} disabled={isLoading || isRecording}>Abrir projeto</button>
+            <input ref={importRef} type="file" accept=".json,application/json" hidden aria-label="Arquivo de projeto" onChange={event => { void importProject(event.target.files?.[0]); event.target.value = ''; }} />
+            {projectNotice && <p role="status">{projectNotice}</p>}
+          </div>
+          {steps.length > 0 && (code !== executedCode || stdin !== executedInput) && <p className="execution-notice" role="status">O código ou a entrada mudou. Execute novamente para atualizar a visualização.</p>}
           <div className="code-editor-wrap">
             <CodeEditor
               code={code}
-              setCode={(nextCode) => {
-                setCode(nextCode);
-                if (editorTab === 'custom') setCustomCode(nextCode);
-              }}
-              onRun={() => void runCode()}
+              setCode={setCode}
+              onRun={() => requestRun()}
+              onCancel={() => runControllerRef.current?.abort()}
+              disabled={isRecording}
               isLoading={isLoading}
               output={terminalText}
               hasError={hasError}
               logs={player.logs}
-              activeLine={player.line}
+              activeLine={code === executedCode ? player.line : null}
             />
           </div>
           <ResizablePanel title="Entrada (stdin)" defaultCollapsed className="stdin-workspace">
@@ -631,6 +735,8 @@ export default function Home() {
             />
           </div>
           </ResizablePanel>
+          <div className="trace-capture-settings"><label htmlFor="trace-capture-limit">Captura da visualização</label><select id="trace-capture-limit" value={tracePreset} disabled={isLoading || isRecording} onChange={event => setTracePreset(event.target.value as TracePreset)}>{Object.entries(TRACE_PRESETS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select><small>Capturas maiores podem levar mais tempo.</small></div>
+          </div>
         </div>
 
         <div
@@ -639,6 +745,9 @@ export default function Home() {
           className={`visualizer-column ${fullscreen ? 'visualizer-fullscreen' : ''} ${isRecording ? 'visualizer-recording' : ''}`}
         >
           <div className="visualizer-header">
+            <button type="button" className="visualization-selection-trigger" aria-label="Alterar visualizações" aria-haspopup="dialog" disabled={isRecording || isLoading} onClick={() => setVisualizationPicker({ source: code, input: stdin, execute: false, available: steps.length ? traceVisualizationKeys(steps, untracedOutput) : undefined })}>
+              <SlidersHorizontal size={14} /><span>{visualizationSelectionLabel(visualizationSelection)}</span><small>alterar</small>
+            </button>
             {traceMode === 'automatic' && <span className="text-xs text-slate-400">automática</span>}
             <GraphToolbar
               layout={layout}
@@ -677,11 +786,13 @@ export default function Home() {
               layout={layout}
               runId={runId}
               hasSteps={steps.length > 0}
+              selection={visualizationSelection}
+              fallbackOutput={untracedOutput}
               graphRef={graphRef}
             />
           </div>
 
-          <ResizablePanel title="Linha do tempo">
+          {Object.values(visualizationSelection).some(Boolean) && <ResizablePanel title="Linha do tempo">
           <TimelineControls
             disabled={isRecording}
             currentStep={player.currentStepIndex}
@@ -694,7 +805,7 @@ export default function Home() {
             onSeek={player.seek}
             onSpeedChange={player.setSpeed}
           />
-          </ResizablePanel>
+          </ResizablePanel>}
           {svgSnapshot && <SvgExportDialog snapshot={svgSnapshot} options={svgOptions} onOptionsChange={setSvgOptions} filename={`runspect-grafo-passo-${player.currentStepIndex + 1}.svg`} onClose={() => setSvgSnapshot(null)} />}
         </div>
       </WorkspaceSplit>
@@ -702,10 +813,15 @@ export default function Home() {
       <footer className="workspace-footer">
         <span><Clock3 className="h-3.5 w-3.5" /> passo {player.totalSteps ? player.currentStepIndex + 1 : 0} de {player.totalSteps}</span>
         <span className="footer-divider" />
-        <span>visualizações: vetores · grafos · estruturas</span>
+        <span className="footer-visualization-selection">visualizações: {visualizationSelectionLabel(visualizationSelection)}</span>
         <button className="footer-action" onClick={() => setShowDocumentation(true)} type="button"><CircleHelp className="h-3.5 w-3.5" /> documentação da API</button>
       </footer>
       {showDocumentation && <DocumentationPanel onClose={() => setShowDocumentation(false)} onLoad={loadDocumentationExample} />}
+      {visualizationPicker && <VisualizationPicker selection={visualizationSelection} source={visualizationPicker.source} available={visualizationPicker.available} execute={visualizationPicker.execute} onClose={() => setVisualizationPicker(null)} onConfirm={selection => {
+        setVisualizationSelection(selection);
+        setVisualizationPicker(null);
+        if (visualizationPicker.execute) void runCode(visualizationPicker.source, visualizationPicker.input);
+      }} />}
 
       {recordingStage && (
         <div
@@ -738,6 +854,8 @@ export default function Home() {
               layout={recordingStage.layout}
               runId={recordingStage.runId}
               hasSteps={recordingStage.steps.length > 0}
+              selection={recordingStage.selection}
+              fallbackOutput={recordingStage.fallbackOutput}
               staticRender
             />
           </div>

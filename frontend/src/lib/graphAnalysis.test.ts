@@ -7,6 +7,40 @@ const nodes = (ids: number[]): GraphNode[] => ids.map((id) => ({ id, label: Stri
 const edges = (pairs: [number, number][]): GraphEdge[] => pairs.map(([source, target]) => ({ source, target }));
 
 describe('graph analysis', () => {
+  it.each([false, true])('analisa caminhos profundos sem estourar a pilha (directed=%s)', (directed) => {
+    const count = 12000;
+    const vertices = nodes(Array.from({ length: count }, (_, i) => i));
+    const links = edges(Array.from({ length: count - 1 }, (_, i) => [i, i + 1]));
+    const result = analyzeGraph(vertices, links, directed);
+    expect(result.cyclic).toBe(false);
+    expect(result.componentCount).toBe(1);
+    expect(result.stronglyConnectedComponents).toBe(directed ? count : 1);
+    expect(result.bridgeCount).toBe(count - 1);
+    expect(result.articulationPointCount).toBe(count - 2);
+    if (directed) expect(result.topologicalOrder).toHaveLength(count);
+    else expect(result.matchingPairs).toHaveLength(count / 2);
+  });
+
+  it('mantém multiarestas fora da lista de pontes', () => {
+    const result = analyzeGraph(nodes([1, 2, 3, 4]), edges([[1, 2], [1, 2], [2, 3], [2, 4]]), false);
+    expect(result.bridgeEdgeIndexes.sort()).toEqual([2, 3]);
+    expect(result.articulationNodeIds).toEqual([2]);
+  });
+
+  it('analisa uma componente fortemente conectada profunda sem recursão', () => {
+    const count = 12000;
+    const result = analyzeGraph(
+      nodes(Array.from({ length: count }, (_, i) => i)),
+      edges(Array.from({ length: count }, (_, i) => [i, (i + 1) % count])),
+      true,
+    );
+    expect(result.cyclic).toBe(true);
+    expect(result.stronglyConnected).toBe(true);
+    expect(result.stronglyConnectedComponents).toBe(1);
+    expect(result.bridgeCount).toBe(0);
+    expect(result.articulationPointCount).toBe(0);
+  });
+
   it('considera apenas arestas cujos extremos existem', () => {
     const result = analyzeGraph(nodes([1, 2]), edges([[1, 2], [2, 99]]), false);
     expect(result.edgeCount).toBe(1);

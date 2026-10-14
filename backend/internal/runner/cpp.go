@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,41 +19,46 @@ import (
 )
 
 type CppRunner struct {
-	HeaderPath         string
-	CompileTimeout     time.Duration
-	RunTimeout         time.Duration
-	MaxEvents          int
-	MaxLineBytes       int
-	MaxStderrBytes     int
-	MaxOutputBytes     int
-	ClangRuntimePath   string
-	CompilerCachePath  string
-	AnalysisTimeout    time.Duration
-	CacheMaxBytes      int
-	cache              compiledCache
-	MemoryBytes        uint64
-	StackBytes         uint64
-	CompileMemoryBytes uint64
-	Sandbox            bool
+	HeaderPath              string
+	CompileTimeout          time.Duration
+	RunTimeout              time.Duration
+	MaxEvents               int
+	MaxLineBytes            int
+	MaxStderrBytes          int
+	MaxOutputBytes          int
+	ClangRuntimePath        string
+	CompilerCachePath       string
+	AnalysisTimeout         time.Duration
+	CacheMaxBytes           int
+	CacheMaxEntries         int
+	cache                   compiledCache
+	AnalysisCacheMaxEntries int
+	analysisCache           analysisCache
+	MemoryBytes             uint64
+	StackBytes              uint64
+	CompileMemoryBytes      uint64
+	Sandbox                 bool
 }
 
 func NewCppRunner(headerPath string) *CppRunner {
 	return &CppRunner{
-		HeaderPath:         headerPath,
-		CompileTimeout:     10 * time.Second,
-		AnalysisTimeout:    30 * time.Second,
-		CacheMaxBytes:      16 << 20,
-		RunTimeout:         3 * time.Second,
-		MaxEvents:          100000,
-		MaxLineBytes:       8 << 20,
-		MaxStderrBytes:     64 << 10,
-		MaxOutputBytes:     8 << 20,
-		ClangRuntimePath:   clangRuntimePath(headerPath),
-		CompilerCachePath:  compilerCachePath(),
-		MemoryBytes:        512 << 20,
-		StackBytes:         256 << 20,
-		CompileMemoryBytes: 2 << 30,
-		Sandbox:            true,
+		HeaderPath:              headerPath,
+		CompileTimeout:          30 * time.Second,
+		AnalysisTimeout:         30 * time.Second,
+		CacheMaxBytes:           16 << 20,
+		CacheMaxEntries:         64,
+		AnalysisCacheMaxEntries: 64,
+		RunTimeout:              3 * time.Second,
+		MaxEvents:               100000,
+		MaxLineBytes:            8 << 20,
+		MaxStderrBytes:          64 << 10,
+		MaxOutputBytes:          8 << 20,
+		ClangRuntimePath:        clangRuntimePath(headerPath),
+		CompilerCachePath:       compilerCachePath(),
+		MemoryBytes:             512 << 20,
+		StackBytes:              256 << 20,
+		CompileMemoryBytes:      2 << 30,
+		Sandbox:                 true,
 	}
 }
 
@@ -131,7 +135,7 @@ func (r *CppRunner) runLimits() []string {
 	}
 }
 
-func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string) []string {
+func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string, environment ...string) []string {
 	if !r.Sandbox {
 		if _, err := exec.LookPath("prlimit"); err != nil {
 			return argv
@@ -168,6 +172,12 @@ func (r *CppRunner) wrap(dir string, compile bool, limits, argv []string) []stri
 	} else {
 		args = append(args, "--ro-bind", dir, "/work")
 	}
+	for _, entry := range environment {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			args = append(args, "--setenv", parts[0], parts[1])
+		}
+	}
 	args = append(args,
 		"--chdir", "/work",
 		"--setenv", "PATH", "/usr/bin:/bin",
@@ -190,9 +200,16 @@ func (r *CppRunner) command(ctx context.Context, dir string, argv []string) *exe
 	return cmd
 }
 
-func (r *CppRunner) compile(ctx context.Context, dir string) string {
+func elapsedMs(start time.Time) float64 {
+	return float64(time.Since(start)) / float64(time.Millisecond)
+}
+
+func (r *CppRunner) compile(ctx context.Context, dir string, metrics *domain.ExecutionMetrics) string {
+	start := time.Now()
+	metrics.CompileAttempts++
+	defer func() { metrics.CompileMs += elapsedMs(start) }()
 	base := r.baseDir(dir)
-	args := []string{"g++", "-O0", "-pipe", "-std=c++17"}
+	args := []string{"g++", "-O0", "-pipe", "-std=c++17", "-DRUNSPECT_TRACE_FD=3"}
 	if r.CompilerCachePath != "" {
 		args = append(args, "-I", r.CompilerCachePath)
 	}
@@ -201,6 +218,7 @@ func (r *CppRunner) compile(ctx context.Context, dir string) string {
 		base+"/solution.cpp",
 		"-o", base+"/solution",
 	)
+	args, resourcesPath := r.measureCompiler(dir, args, metrics.CompileAttempts)
 	argv := r.wrap(dir, true, r.compileLimits(), args)
 
 	out := &limitedBuffer{max: r.MaxStderrBytes}
@@ -209,7 +227,12 @@ func (r *CppRunner) compile(ctx context.Context, dir string) string {
 	cmd.Stderr = out
 
 	err := cmd.Run()
+	readCompileResources(resourcesPath, metrics)
+	if ctx.Err() != nil {
+		metrics.CompileResourcesComplete = false
+	}
 	if ctx.Err() == context.DeadlineExceeded {
+		metrics.CompileTimeouts++
 		return "Tempo de compilação excedido"
 	}
 	if err != nil {
@@ -248,43 +271,37 @@ func describeExit(err error, stderr string) string {
 	return fmt.Sprintf("Erro em tempo de execução: %s\n%s", reason, message)
 }
 
-func (r *CppRunner) execute(dir, stdin string, start time.Time, automatic bool) domain.ExecutionResult {
-	ctx, cancel := context.WithTimeout(context.Background(), r.RunTimeout)
+func (r *CppRunner) execute(parent context.Context, dir, stdin string, metrics *domain.ExecutionMetrics, options domain.TraceOptions) domain.ExecutionResult {
+	start := time.Now()
+	defer func() { metrics.ExecuteMs += elapsedMs(start) }()
+	ctx, cancel := context.WithTimeout(parent, r.RunTimeout)
 	defer cancel()
 
 	base := r.baseDir(dir)
-	argv := r.wrap(dir, false, r.runLimits(), []string{base + "/solution"})
+	environment := []string{"RUNSPECT_TRACE_MAX_STEPS=" + strconv.Itoa(options.MaxSteps), "RUNSPECT_TRACE_MAX_ITEMS=" + strconv.Itoa(options.MaxItems)}
+	argv := r.wrap(dir, false, r.runLimits(), []string{base + "/solution"}, environment...)
 
 	cmd := r.command(ctx, dir, argv)
+	if !r.Sandbox {
+		cmd.Env = append(cmd.Env, environment...)
+	}
 	cmd.Stdin = strings.NewReader(stdin)
 	stderr := &limitedBuffer{max: r.MaxStderrBytes}
 	cmd.Stderr = stderr
 
-	var stdout io.ReadCloser
-	var err error
-	var traceWriter *os.File
-	var programOutput *limitedBuffer
-	if automatic {
-		stdout, traceWriter, err = os.Pipe()
-		if err == nil {
-			defer stdout.Close()
-			defer traceWriter.Close()
-			cmd.ExtraFiles = []*os.File{traceWriter}
-			programOutput = &limitedBuffer{max: r.MaxOutputBytes}
-			cmd.Stdout = programOutput
-		}
-	} else {
-		stdout, err = cmd.StdoutPipe()
-	}
+	stdout, traceWriter, err := os.Pipe()
 	if err != nil {
 		return fail("Erro ao capturar saída")
 	}
+	defer stdout.Close()
+	defer traceWriter.Close()
+	cmd.ExtraFiles = []*os.File{traceWriter}
+	programOutput := &limitedBuffer{max: r.MaxOutputBytes}
+	cmd.Stdout = programOutput
 	if err := cmd.Start(); err != nil {
 		return fail("Erro ao executar binário")
 	}
-	if traceWriter != nil {
-		_ = traceWriter.Close()
-	}
+	_ = traceWriter.Close()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), r.MaxLineBytes)
@@ -379,6 +396,7 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time, automatic bool) 
 		}
 	}
 	if ctx.Err() == context.DeadlineExceeded {
+		metrics.ExecuteTimeout = true
 		return domain.ExecutionResult{Success: false, Steps: steps, Output: plainOutput.String(), Errors: "Time Limit Exceeded (TLE)"}
 	}
 	if waitErr != nil {
@@ -394,7 +412,6 @@ func (r *CppRunner) execute(dir, stdin string, start time.Time, automatic bool) 
 		Success: true,
 		Steps:   steps,
 		Output:  plainOutput.String(),
-		TimeMs:  time.Since(start).Milliseconds(),
 	}
 }
 
@@ -417,8 +434,6 @@ func finishExecution(result domain.ExecutionResult, trace instrumentation) domai
 	}
 	remaining := strings.TrimPrefix(result.Output, tracedOutput.String())
 	if trace.Mode != "manual" && remaining != "" {
-		// Only untraced output (e.g. printf or output beyond the frame limit)
-		// belongs to the final frame. cout chunks already have their own lines.
 		output := domain.TraceStep{StepEvent: "PROGRAM_OUTPUT", Data: map[string]any{"text": remaining}}
 		if !strings.HasPrefix(result.Output, tracedOutput.String()) {
 			output.Data["replace"] = true
@@ -442,7 +457,41 @@ func finishExecution(result domain.ExecutionResult, trace instrumentation) domai
 }
 
 func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
+	return r.RunWithOptions(code, stdin, domain.TraceOptions{})
+}
+
+func (r *CppRunner) RunWithOptions(code, stdin string, options domain.TraceOptions) (result domain.ExecutionResult) {
+	return r.RunWithContext(context.Background(), code, stdin, options)
+}
+
+func (r *CppRunner) RunWithContext(ctx context.Context, code, stdin string, options domain.TraceOptions) (result domain.ExecutionResult) {
+	options = options.Normalized()
 	start := time.Now()
+	metrics := &domain.ExecutionMetrics{CompileResourcesComplete: true}
+	prepared := false
+	stage := "prepare"
+	defer func() {
+		if ctx.Err() != nil {
+			result.Success = false
+			result.Errors = "Execução cancelada"
+		}
+		if !prepared {
+			metrics.PrepareMs = elapsedMs(start)
+		}
+		metrics.TotalMs = elapsedMs(start)
+		metrics.CacheEntries, metrics.CacheBytes, metrics.CacheEvictions = r.cache.stats()
+		result.TimeMs = int64(metrics.TotalMs)
+		result.Metrics = metrics
+		if result.TraceMode == "automatic" {
+			result.TraceLimits = &options
+		}
+		if !result.Success {
+			metrics.FailedStage = stage
+		}
+	}()
+	if ctx.Err() != nil {
+		return fail("Execução cancelada")
+	}
 
 	if message := r.checkTools(); message != "" {
 		return fail(message)
@@ -465,37 +514,52 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 		return fail("Falha ao salvar código C++")
 	}
 	key := r.cacheKey(code, headerContent)
-	if cached, ok := r.cache.get(key, r.CacheMaxBytes); ok {
+	metrics.PrepareMs = elapsedMs(start)
+	prepared = true
+	if cached, ok := r.cache.get(key, r.CacheMaxBytes); ok && r.CacheMaxEntries > 0 {
+		metrics.CacheHit = true
 		if err := os.WriteFile(filepath.Join(tmpDir, "solution"), cached.binary, 0700); err != nil {
 			return fail("Falha ao preparar binário em cache")
 		}
-		result := r.execute(tmpDir, stdin, start, cached.trace.Mode != "manual")
+		stage = "execute"
+		result := r.execute(ctx, tmpDir, stdin, metrics, options)
 		return finishExecution(result, cached.trace)
 	}
-	trace, message := r.instrument(tmpDir, code)
+	analysisStart := time.Now()
+	stage = "analysis"
+	trace, message := r.instrumentSource(ctx, tmpDir, code, false)
+	metrics.AnalysisMs = elapsedMs(analysisStart)
+	if ctx.Err() != nil {
+		return fail("Execução cancelada")
+	}
 	if message != "" {
-		// Clang and GCC accept different extensions. A failure to instrument
-		// must not prevent otherwise valid C++ from running with GCC.
+		metrics.Fallback = true
+		metrics.AnalysisTimeout = message == "Tempo de análise automática excedido"
 		trace = instrumentation{Mode: "unavailable", Warnings: []string{"Visualização automática indisponível para este código. " + message}}
 		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 			return fail("Falha ao restaurar código original")
 		}
 	}
 
-	compileCtx, cancelCompile := context.WithTimeout(context.Background(), r.CompileTimeout)
-	compileMessage := r.compile(compileCtx, tmpDir)
+	compileCtx, cancelCompile := context.WithTimeout(ctx, r.CompileTimeout)
+	stage = "compile"
+	compileMessage := r.compile(compileCtx, tmpDir, metrics)
 	cancelCompile()
+	if ctx.Err() != nil {
+		return fail("Execução cancelada")
+	}
 	if message := compileMessage; message != "" {
 		if trace.Mode != "automatic" {
 			return fail(message)
 		}
+		metrics.Fallback = true
 		if err := os.WriteFile(filepath.Join(tmpDir, "solution.cpp"), []byte(code), 0644); err != nil {
 			return fail("Falha ao restaurar código original")
 		}
-		// The original program gets its own compilation budget. A timed-out
-		// instrumented attempt must not leave the fallback context expired.
-		fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), r.CompileTimeout)
-		originalError := r.compile(fallbackCtx, tmpDir)
+		fallbackCtx, cancelFallback := context.WithTimeout(ctx, r.CompileTimeout)
+		beforeFallback := metrics.CompileMs
+		originalError := r.compile(fallbackCtx, tmpDir, metrics)
+		metrics.FallbackCompileMs = metrics.CompileMs - beforeFallback
 		cancelFallback()
 		if originalError != "" {
 			return fail(originalError)
@@ -507,10 +571,11 @@ func (r *CppRunner) Run(code, stdin string) domain.ExecutionResult {
 		path := filepath.Join(tmpDir, "solution")
 		if info, err := os.Stat(path); err == nil && r.CacheMaxBytes > 0 && info.Size() <= int64(r.CacheMaxBytes) {
 			if binary, err := os.ReadFile(path); err == nil {
-				r.cache.put(key, compiledProgram{binary: binary, trace: trace}, r.CacheMaxBytes)
+				r.cache.put(key, compiledProgram{binary: binary, trace: trace}, r.CacheMaxBytes, r.CacheMaxEntries)
 			}
 		}
 	}
-	result := r.execute(tmpDir, stdin, start, trace.Mode != "manual")
+	stage = "execute"
+	result = r.execute(ctx, tmpDir, stdin, metrics, options)
 	return finishExecution(result, trace)
 }

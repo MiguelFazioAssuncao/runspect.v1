@@ -1,5 +1,7 @@
 import type { TraceStep } from '@/types/visualizer';
 import type { CallFrame, MatrixSnapshot, StructureChange, StructureSnapshot } from './structureViews';
+import { referenceSnapshot } from './references';
+import type { ReferenceSnapshot } from './references';
 
 export interface VectorMetadata {
   kind?: string;
@@ -18,6 +20,7 @@ export interface TraceState {
   logs: string[];
   output: string;
   warnings: string[];
+  references?: ReferenceSnapshot;
 }
 
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.map(String) : [];
@@ -66,11 +69,13 @@ export function createTraceReplay(steps: TraceStep[]) {
   let warnings: string[] = [];
   let output = '';
   let activeScope: Set<string> | null = null;
+  let references: ReferenceSnapshot | undefined;
   const reset = () => {
     previous = -1; boundary = true; structures = new Map(); matrices = new Map();
     calls = new Map(); vectorMeta = {}; reads = new Set(); writes = new Set();
     logs = []; warnings = []; output = '';
     activeScope = null;
+    references = undefined;
   };
   return (eventIndex: number): TraceState => {
     if (eventIndex < previous) reset();
@@ -91,7 +96,10 @@ export function createTraceReplay(steps: TraceStep[]) {
         // Hide suspended caller bindings without deleting their snapshots:
         // unchanged containers need to reappear when the caller resumes.
         activeScope = new Set(data.names.map(String));
+      } else if (event === 'SET_REFERENCES') {
+        references = referenceSnapshot(data, references);
       } else if (event === 'SET_STRUCT' && name) {
+        activeScope?.add(name);
         const items = strings(data.items), before = structures.get(name);
         const kind = typeof data.kind === 'string' ? data.kind : before?.kind;
         const changes = diffItems(before?.items ?? [], items, /set|map/.test(kind ?? ''));
@@ -105,9 +113,11 @@ export function createTraceReplay(steps: TraceStep[]) {
           writes.add(name === 'Variáveis' ? item.split(' = ')[0] : name);
         });
       } else if (event === 'UNINITIALIZED' && name) {
+        activeScope?.add(name);
         if (data.initialized === true) structures.delete(name);
         else structures.set(name, { name, kind: String(data.kind ?? 'scalar'), items: [], initialized: false, changes: [] });
       } else if (event === 'SET_MATRIX' && name) {
+        activeScope?.add(name);
         const rows = Array.isArray(data.rows) ? data.rows.map(strings) : [];
         const before = matrices.get(name);
         const shape = data.shape as { rows: number; cols: number } | undefined;
@@ -130,7 +140,7 @@ export function createTraceReplay(steps: TraceStep[]) {
         calls.set(data.id, { id: data.id, parent: typeof data.parent === 'number' ? data.parent : null, function: String(data.function ?? '?'), depth: typeof data.depth === 'number' ? data.depth : 0, line: data.line ?? 0, status: 'active' });
       } else if (event === 'CALL_EXIT' && typeof data.id === 'number') {
         const call = calls.get(data.id);
-        if (call) calls.set(data.id, { ...call, status: 'returned' });
+        if (call) calls.set(data.id, { ...call, status: data.status === 'threw' ? 'threw' : 'returned' });
       } else if (event === 'PRINT') {
         logs.push(String(data.message ?? steps[i].message ?? ''));
       } else if (event === 'PROGRAM_OUTPUT' && typeof data.text === 'string') {
@@ -146,7 +156,7 @@ export function createTraceReplay(steps: TraceStep[]) {
       }
     }
     previous = last;
-    return { structs: [...structures.values()].filter(s => s.name === 'Variáveis' || s.name === 'Execução' || activeScope === null || activeScope.has(s.name)), matrices: [...matrices.values()].filter(m => activeScope === null || activeScope.has(m.name)), calls: [...calls.values()], vectorMeta, reads: [...reads].filter(Boolean), writes: [...writes].filter(Boolean), logs: [...logs], warnings: [...warnings], output };
+    return { structs: [...structures.values()].filter(s => s.name === 'Variáveis' || s.name === 'Execução' || activeScope === null || activeScope.has(s.name)), matrices: [...matrices.values()].filter(m => activeScope === null || activeScope.has(m.name)), calls: [...calls.values()], vectorMeta, reads: [...reads].filter(Boolean), writes: [...writes].filter(Boolean), logs: [...logs], warnings: [...warnings], output, ...(references ? { references } : {}) };
   };
 }
 

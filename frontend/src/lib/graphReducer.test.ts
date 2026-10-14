@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGraphState, frameEnds, isDirected, isMulti, isWeighted } from './graphReducer';
+import { buildGraphState, createGraphFlagIndex, frameEnds, isDirected, isMulti, isWeighted } from './graphReducer';
 import type { TraceStep } from '@/types/visualizer';
 
 const event = (step_event: string, data: TraceStep['data']): TraceStep => ({ step: 0, step_event, data });
@@ -12,6 +12,22 @@ const base = [
 ];
 
 describe('graphReducer semantic events', () => {
+  it('indexed flags match replay semantics during backward and forward seeks', () => {
+    const steps = numbered([
+      event('ADD_NODE', { id: 1 }),
+      event('SET_DIRECTED', { directed: false }),
+      event('SET_WEIGHTED', { weighted: false }),
+      event('STEP', {}),
+      event('SET_MULTI', { multi: true }),
+      event('SET_DIRECTED', { directed: true }),
+      event('STEP', { directed: false }),
+    ]);
+    const flags = createGraphFlagIndex(steps);
+    for (const index of [-1, 0, 1, 4, 6, 3, 2, 100, -1]) {
+      expect(flags(index)).toEqual({ directed: isDirected(steps, index), weighted: isWeighted(steps, index), multi: isMulti(steps, index) });
+    }
+    expect(createGraphFlagIndex([])(0)).toEqual({ directed: true, weighted: true, multi: false });
+  });
   it('aplica a última configuração até o quadro atual, sem antecipar eventos', () => {
     const steps = numbered([
       event('SET_DIRECTED', { directed: false }),

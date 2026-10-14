@@ -81,8 +81,8 @@ func TestAutomaticNewTypesNeverCopyCustomObjectsOrReadTupleReferences(t *testing
 	res := newRunner(t).Run(`#include <bits/stdc++.h>
 using namespace std;
 struct SemCopia {
- int valor;
- SemCopia() : valor(9) {}
+ int valor=9;
+ SemCopia() = default;
  SemCopia(const SemCopia&) = delete;
 };
 int main() {
@@ -102,8 +102,8 @@ int main() {
 	if !hasStructureItems(res, "referencia", "0 = referência não expandida") {
 		t.Fatal("referência não inicializada foi expandida")
 	}
-	if !hasStructureItems(res, "objeto", "valor = tipo não expandido") {
-		t.Fatal("objeto personalizado deveria permanecer opaco")
+	if !hasStructureItems(res, "objeto", "valor = {valor = 9}") {
+		t.Fatal("campos públicos do objeto sem cópia deveriam ser expandidos")
 	}
 	if !hasStructureItems(res, "dispositivo", "0 = valor volatile não expandido") {
 		t.Fatal("elemento volatile deveria permanecer opaco")
@@ -178,15 +178,17 @@ int main() {
 		if !res.Success || res.TraceMode != "automatic" || res.Output != "ok" {
 			t.Fatalf("input=%s mode=%s output=%q error=%s warnings=%v", input, res.TraceMode, res.Output, res.Errors, res.TraceWarnings)
 		}
+		observed := false
 		for _, step := range res.Steps {
 			if step.StepEvent == "SET_STRUCT" && step.Data["name"] == "Variáveis" {
 				items, _ := step.Data["items"].([]any)
 				for _, item := range items {
-					if strings.Contains(item.(string), "ignorado =") {
-						t.Fatal("observou escalar cuja declaração pode ser saltada")
-					}
+					observed = observed || strings.Contains(item.(string), "ignorado = 7")
 				}
 			}
+		}
+		if observed != (input == "0") {
+			t.Fatalf("valor de case: input=%s observed=%v", input, observed)
 		}
 	}
 }

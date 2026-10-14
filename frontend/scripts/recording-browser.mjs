@@ -1,3 +1,4 @@
+import { confirmAllVisualizations, mockVisualizationAnalysis } from './browser-selection.mjs';
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/recording-browser.mjs baseline
 import { writeFile, mkdir } from 'node:fs/promises';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -36,6 +37,7 @@ function fixture(kind, count) {
     event(kind === 'vector' ? 'VECTOR_STEP':'STEP', {name:'a',caption:`Passo ${i}`,line:i%8+1});
   }
 }
+await mockVisualizationAnalysis(page, () => trace);
 await page.route('**/api/run', route => route.fulfill({ json: { success:true,steps:trace,time_ms:1 } }));
 // Isolate recording from Monaco's CDN/network while keeping the real application DOM.
 await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
@@ -51,7 +53,7 @@ const cases = process.env.RECORDING_CASES ? JSON.parse(process.env.RECORDING_CAS
 for (const [kind,count,speed,layout] of cases) {
   console.log("starting",kind,count,speed);
   fixture(kind,count);
-  await page.getByRole('button',{name:'Executar Algoritmo'}).click();
+  await page.getByRole('button',{name:'Executar Algoritmo'}).click(); await confirmAllVisualizations(page);
   await page.waitForFunction(count => document.querySelector('.timeline-step')?.textContent.includes(`/ ${count}`), count);
   await page.getByRole('button',{name:'Gravar',exact:true}).waitFor({state:'visible'});
   if (await page.getByLabel('Velocidade de reprodução').count()) await page.getByLabel('Velocidade de reprodução').selectOption(String(speed));

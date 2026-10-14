@@ -82,6 +82,19 @@ class Instrumenter:
         self.warnings = set()
         self.functions = []
         self.globals = {}
+        self.global_offsets = {}
+        self.variable_types = {}
+        self.observed = set()
+        self.reachable = set()
+        self.current_reachable = False
+        self.available = set()
+        self.records = {}
+        self.complete_records = set()
+        self.ready_flags = None
+        self.constexpr_function = False
+        self.constexpr_guard = None
+        self.heap_tracking = True
+        self.unsafe_lifetime = False
 
     def own(self, node):
         return node.location.file and str(node.location.file) == self.path
@@ -115,13 +128,17 @@ class Instrumenter:
         if not name or not re.fullmatch(r"[A-Za-z_]\w*", name):
             return None
         if typ.is_volatile_qualified() or typ.kind in (
-            self.ci.TypeKind.POINTER, self.ci.TypeKind.INVALID,
+            self.ci.TypeKind.INVALID,
             self.ci.TypeKind.INCOMPLETEARRAY, self.ci.TypeKind.VARIABLEARRAY,
         ):
+            return None
+        if typ.kind == self.ci.TypeKind.POINTER and typ.get_pointee().kind in (self.ci.TypeKind.FUNCTIONPROTO, self.ci.TypeKind.FUNCTIONNOPROTO):
             return None
         # No arbitrary operator<<, pointer dereference, or reading indeterminate
         # scalars/arrays. Default-constructed standard containers are initialized.
         spelling = typ.spelling
+        if self.unsafe_lifetime and typ.kind != self.ci.TypeKind.POINTER and not self.numeric(typ) and typ.kind != self.ci.TypeKind.ENUM:
+            return None
         standard = any(part in spelling for part in (
             "std::vector<", "std::basic_string<", "std::array<", "std::deque<",
             "std::list<", "std::set<", "std::multiset<", "std::map<", "std::multimap<", "std::unordered_",
@@ -135,19 +152,196 @@ class Instrumenter:
             has_init = any(c.kind.is_expression() for c in self.children(node)) and "(" in tokens
         if "std::array<" in spelling and not initialized:
             has_init = "=" in tokens or "{" in tokens
+            if not has_init:
+                return None
         ready = None
         if not has_init:
-            if typ.kind == self.ci.TypeKind.CONSTANTARRAY or typ.kind == self.ci.TypeKind.RECORD:
+            if typ.kind == self.ci.TypeKind.CONSTANTARRAY:
                 return None
-            ready = self.prefix + "ready_" + str(node.location.offset)
+            if typ.kind != self.ci.TypeKind.RECORD:
+                ready = self.prefix + "ready_" + str(node.location.offset)
         if not standard and typ.kind == self.ci.TypeKind.RECORD:
-            self.warnings.add("Objetos personalizados e ponteiros não são expandidos automaticamente.")
-            return None
+            definition = self.record_definition(typ)
+            if not definition:
+                self.warnings.add("Somente campos públicos de structs/classes nomeadas são expandidos; unions, structs locais e classes template permanecem opacos.")
+                return None
+            if "{" in tokens and self.aggregate_record(definition):
+                self.complete_records.add(node.get_usr())
+        self.variable_types[node.get_usr()] = typ
         return (name, node.get_usr(), node.location.line, ready)
+
+    def type_name(self, typ):
+        return re.sub(r"^(?:(?:const|volatile)\s+)+", "", typ.get_canonical().spelling).replace(" ", "")
+
+    def record_definition(self, typ):
+        if self.unsafe_lifetime: return None
+        if typ.kind != self.ci.TypeKind.RECORD or self.type_name(typ).startswith("std::"):
+            return None
+        declaration = typ.get_declaration()
+        definition = declaration.get_definition() or declaration
+        if (not self.own(definition) or not definition.spelling or definition.kind not in (self.K.STRUCT_DECL, self.K.CLASS_DECL)
+                or not definition.lexical_parent or definition.lexical_parent.kind not in (self.K.TRANSLATION_UNIT, self.K.NAMESPACE)
+                or definition.semantic_parent != definition.lexical_parent):
+            return None
+        fields = [field for field in self.children(definition) if field.kind == self.K.FIELD_DECL and field.spelling
+                  and field.access_specifier == self.ci.AccessSpecifier.PUBLIC]
+        return definition if fields else None
+
+    def aggregate_record(self, definition):
+        return not any(child.kind in (self.K.CONSTRUCTOR, self.K.CXX_BASE_SPECIFIER) for child in self.children(definition))
+
+    def record_accessors(self, definition):
+        fields = [field for field in self.children(definition) if field.kind == self.K.FIELD_DECL and field.spelling
+                  and field.access_specifier == self.ci.AccessSpecifier.PUBLIC]
+        if not fields: return
+        value = self.prefix + "object"
+        result = self.prefix + "fields"
+        code = f" inline std::vector<::runspect_auto::ObjectField> runspect_record_fields(const {definition.spelling}& {value}, bool initialized) {{ std::vector<::runspect_auto::ObjectField> {result};"
+        for field in fields[:2048]:
+            typ = field.type.get_canonical()
+            tokens = [token.spelling for token in field.get_tokens()]
+            default = "=" in tokens or "{" in tokens or (typ.kind == self.ci.TypeKind.RECORD and self.type_name(typ).startswith("std::") and not self.type_name(typ).startswith("std::array<"))
+            ready = "true" if default else "initialized"
+            if typ.kind in (self.ci.TypeKind.LVALUEREFERENCE, self.ci.TypeKind.RVALUEREFERENCE) or typ.is_volatile_qualified():
+                message = "referência não expandida" if not typ.is_volatile_qualified() else "valor volatile não expandido"
+                item = "::runspect_auto::ObjectField{" + json.dumps(field.spelling) + "," + json.dumps(message) + "}"
+            elif field.is_bitfield():
+                item = f"({ready} ? ::runspect_auto::object_field({json.dumps(field.spelling)},+{value}.{field.spelling},true) : ::runspect_auto::ObjectField{{{json.dumps(field.spelling)},\"inicialização não confirmada\"}})"
+            else:
+                item = f"::runspect_auto::object_field({json.dumps(field.spelling)},{value}.{field.spelling},{ready})"
+            code += f" if({result}.size() < ::runspect_auto::max_items) {result}.push_back({item});"
+        code += f" if({len(fields)} > ::runspect_auto::max_items) ::runspect_auto::items_limit(); return {result}; }}"
+        code += f" inline const char* runspect_record_type(const {definition.spelling}*) {{ return {json.dumps(definition.type.spelling)}; }} "
+        self.insert(self.end(definition), code)
+
+    def reference_type(self, typ):
+        typ = typ.get_canonical()
+        if typ.kind == self.ci.TypeKind.POINTER or self.record_definition(typ): return True
+        item = self.sequence_item(typ)
+        return item is not None and self.reference_type(item)
+
+    def sequence_item(self, typ):
+        typ = typ.get_canonical()
+        if typ.kind == self.ci.TypeKind.CONSTANTARRAY:
+            return typ.get_array_element_type().get_canonical()
+        spelling = self.type_name(typ)
+        if any(spelling.startswith("std::" + name + "<") for name in (
+            "vector", "array", "deque", "list", "set", "multiset", "unordered_set", "unordered_multiset", "basic_string",
+        )):
+            return typ.get_template_argument_type(0).get_canonical()
+        return None
+
+    def numeric(self, typ):
+        return typ.get_canonical().kind in {
+            self.ci.TypeKind.BOOL, self.ci.TypeKind.CHAR_U, self.ci.TypeKind.UCHAR,
+            self.ci.TypeKind.CHAR16, self.ci.TypeKind.CHAR32, self.ci.TypeKind.USHORT,
+            self.ci.TypeKind.UINT, self.ci.TypeKind.ULONG, self.ci.TypeKind.ULONGLONG,
+            self.ci.TypeKind.UINT128, self.ci.TypeKind.CHAR_S, self.ci.TypeKind.SCHAR,
+            self.ci.TypeKind.WCHAR, self.ci.TypeKind.SHORT, self.ci.TypeKind.INT,
+            self.ci.TypeKind.LONG, self.ci.TypeKind.LONGLONG, self.ci.TypeKind.INT128,
+            self.ci.TypeKind.FLOAT, self.ci.TypeKind.DOUBLE, self.ci.TypeKind.LONGDOUBLE,
+        }
+
+    def safe_item(self, typ):
+        typ = typ.get_canonical()
+        if typ.kind in (self.ci.TypeKind.LVALUEREFERENCE, self.ci.TypeKind.RVALUEREFERENCE):
+            typ = typ.get_pointee().get_canonical()
+        spelling = self.type_name(typ)
+        if self.numeric(typ) or typ.kind == self.ci.TypeKind.ENUM or spelling == "std::basic_string<char>" or spelling.startswith("std::basic_string<char,"):
+            return True
+        if spelling.startswith("std::pair<"):
+            return all(self.safe_item(typ.get_template_argument_type(i)) for i in (0, 1))
+        if self.record_definition(typ): return True
+        return False
+
+    def observed_capability(self, usr):
+        typ = self.variable_types[usr]
+        spelling = self.type_name(typ)
+        item = self.sequence_item(typ)
+        if usr in self.graphs and item is not None:
+            if self.sequence_item(item) is not None:
+                return "graph"
+            if self.type_name(item).startswith("std::pair<"):
+                args = [item.get_template_argument_type(i).get_canonical() for i in (0, 1)]
+                if all(self.numeric(arg) and arg.kind not in (self.ci.TypeKind.FLOAT, self.ci.TypeKind.DOUBLE, self.ci.TypeKind.LONGDOUBLE) for arg in args):
+                    return "graph"
+                return None
+        if self.numeric(typ) or typ.kind == self.ci.TypeKind.ENUM:
+            return "structures"
+        if typ.kind == self.ci.TypeKind.POINTER or self.record_definition(typ): return "structures"
+        if item is not None:
+            if self.numeric(item):
+                return "vectors"
+            cell = self.sequence_item(item)
+            if cell is not None:
+                return "matrices" if self.safe_item(cell) or cell.kind == self.ci.TypeKind.POINTER else None
+            if any(self.type_name(item).startswith("std::" + name + "<") for name in ("pair", "tuple", "optional", "bitset")):
+                return "structures"
+            return "structures" if self.safe_item(item) or item.kind == self.ci.TypeKind.POINTER else None
+        if spelling.startswith("std::bitset<"):
+            return "vectors"
+        if any(spelling.startswith("std::" + name + "<") for name in (
+            "pair", "tuple", "optional", "map", "multimap", "unordered_map", "unordered_multimap", "queue", "stack", "priority_queue",
+        )):
+            if any(spelling.startswith("std::" + name + "<") for name in ("queue", "stack", "priority_queue")):
+                item = typ.get_template_argument_type(0).get_canonical()
+                if not self.safe_item(item):
+                    return None
+            return "structures"
+        return None
+
+    def reachable_functions(self):
+        functions = {function.get_usr(): function for function in self.functions}
+        offsets = {offset: usr for usr, function in functions.items() for offset in (function.extent.start.offset, function.location.offset)}
+        pending = [usr for usr, function in functions.items() if function.spelling == "main"]
+        while pending:
+            usr = pending.pop()
+            if usr in self.reachable:
+                continue
+            self.reachable.add(usr)
+            for node in self.descendants(functions[usr]):
+                # Function references also cover callback arguments and aliases.
+                if node.referenced:
+                    target = node.referenced.get_usr()
+                    if target not in functions and self.own(node.referenced):
+                        target = offsets.get(node.referenced.extent.start.offset) or offsets.get(node.referenced.location.offset)
+                        if target is None and node.referenced.kind in (self.K.FUNCTION_DECL, self.K.CXX_METHOD):
+                            target = next((candidate for candidate, function in functions.items()
+                                           if function.spelling == node.referenced.spelling
+                                           and function.extent.start.offset <= node.referenced.location.offset < function.extent.end.offset), None)
+                    if target in functions: pending.append(target)
+
+    def source_capabilities(self, manual=False):
+        available = set(self.available) if not manual else set()
+        for function in self.functions:
+            if function.get_usr() not in self.reachable:
+                continue
+            for node in self.descendants(function):
+                if node.kind != self.K.CALL_EXPR or not node.referenced:
+                    continue
+                target = node.referenced
+                parent = target.semantic_parent
+                if manual and parent and parent.kind == self.K.NAMESPACE and parent.spelling == "viz":
+                    if target.spelling in ("add_node", "add_edge"):
+                        available.add("graph")
+                    elif target.spelling in ("vector_init", "vector_result"):
+                        available.add("vectors")
+                    elif target.spelling == "show":
+                        available.add("structures")
+                    elif target.spelling == "show_matrix":
+                        available.add("matrices")
+                refs = [sub for sub in self.descendants(node) if sub.kind == self.K.DECL_REF_EXPR and sub.referenced]
+                if node.spelling == "operator<<" and any(sub.spelling in ("cout", "wcout") and sub.referenced.semantic_parent and sub.referenced.semantic_parent.spelling == "std" for sub in refs):
+                    available.add("output")
+                if not self.own(target) and target.spelling in ("printf", "puts", "putchar", "wprintf", "putwchar"):
+                    available.add("output")
+                if not self.own(target) and target.spelling in ("fprintf", "fputs", "fputc", "fwrite") and any(sub.spelling == "stdout" for sub in refs):
+                    available.add("output")
+        return sorted(available)
 
     def collect(self, node, globals_allowed=True):
         for child in self.children(node):
-            if child.kind in (self.K.FUNCTION_DECL, self.K.CXX_METHOD, self.K.FUNCTION_TEMPLATE):
+            if child.kind in (self.K.FUNCTION_DECL, self.K.CXX_METHOD, self.K.FUNCTION_TEMPLATE, self.K.DESTRUCTOR):
                 if child.is_definition():
                     self.functions.append(child)
             elif child.kind == self.K.VAR_DECL and globals_allowed and child.is_definition():
@@ -158,7 +352,10 @@ class Instrumenter:
                 v = self.variable(child, initialized=True)
                 if v:
                     self.globals[v[0]] = v
+                    self.global_offsets[v[1]] = child.extent.start.offset
             elif child.kind in (self.K.NAMESPACE, self.K.STRUCT_DECL, self.K.CLASS_DECL):
+                if child.kind in (self.K.STRUCT_DECL, self.K.CLASS_DECL) and child.is_definition() and self.record_definition(child.type):
+                    self.records[child.get_usr()] = child
                 self.collect(child, globals_allowed=False)
 
     def inspect_patterns(self, node):
@@ -227,11 +424,17 @@ class Instrumenter:
             display = self.aliases.get(usr, name)
             if display != name and display in scope and scope[display][1] == self.alias_targets[usr]:
                 continue
+            if self.current_reachable:
+                self.observed.add(usr)
             method = "graph" if usr in self.graphs else "observe"
-            sorting = ",true" if method == "observe" and usr in self.sorting_vectors else ""
-            call = f"{frame}.{method}({json.dumps(display, ensure_ascii=True)},{name}{sorting});"
+            arguments = ""
+            if method == "observe":
+                arguments = "," + ("true" if usr in self.sorting_vectors else "false")
+                arguments += "," + ("true" if usr in self.complete_records else "false")
+            call = f"{frame}.{method}({json.dumps(display, ensure_ascii=True)},{name}{arguments});"
             calls.append((f"if({ready}) {{ {call} }} else {frame}.uninitialized({json.dumps(display)});" if ready else call))
-        return "{ ::runspect_auto::Frame " + frame + "(" + json.dumps(caption) + "," + str(line) + ");" + "".join(calls) + "}"
+        code = "{ ::runspect_auto::Frame " + frame + "(" + json.dumps(caption) + "," + str(line) + ");" + "".join(calls) + "}"
+        return "if(!::runspect_auto::constant_evaluation()) ([&]() " + code + ")();" if self.constexpr_function else code
 
     def refs_written(self, node):
         """Recognize a direct initialized scalar assignment, not a read-modify-write."""
@@ -304,6 +507,7 @@ class Instrumenter:
         return f"::runspect_auto::match({json.dumps(displays[text_names[0]])},{json.dumps(displays[pattern])},{position},{length},{node.location.line});"
 
     def reads(self, node, scope):
+        if self.constexpr_function: return
         # Replace only a named container's subscript. The index is evaluated
         # exactly once by read(), which returns the original reference/proxy.
         # Mutation sites are excluded: this hook describes reads/comparisons.
@@ -331,7 +535,9 @@ class Instrumenter:
                 usr = scope[name][1]
                 # Nested matrix rows and custom containers are excluded by type.
                 typ = node.type.get_canonical()
-                if usr in self.graphs or typ.kind not in (self.ci.TypeKind.RECORD, self.ci.TypeKind.LVALUEREFERENCE) or "bool" in typ.spelling:
+                container = self.variable_types[usr]
+                supported = self.sequence_item(container) is not None or self.type_name(container).startswith("std::bitset<")
+                if supported and (usr in self.graphs or typ.kind not in (self.ci.TypeKind.RECORD, self.ci.TypeKind.LVALUEREFERENCE) or "bool" in typ.spelling):
                     display = self.aliases.get(usr, name)
                     self.replace(node.extent.start.offset, node.extent.end.offset,
                                  f"::runspect_auto::read({json.dumps(display)},{name},({match.group(2)}),{node.location.line})")
@@ -340,6 +546,7 @@ class Instrumenter:
             self.reads(child, scope)
 
     def matrix_access(self, node, scope, write=False):
+        if self.constexpr_function: return False
         match = re.fullmatch(r"([A-Za-z_]\w*)\s*\[([^\[\]]+)\]\s*\[([^\[\]]+)\]",self.text(node))
         if not match or match.group(1) not in scope or scope[match.group(1)][1] in self.graphs:
             return False
@@ -347,6 +554,8 @@ class Instrumenter:
         if typ.kind in (self.ci.TypeKind.RECORD,self.ci.TypeKind.POINTER) and "bool" not in typ.spelling:
             return False
         name,row,col = match.groups()
+        item = self.sequence_item(self.variable_types[scope[name][1]])
+        if item is None or self.sequence_item(item) is None: return False
         display = self.aliases.get(scope[name][1],name)
         # Calling a method on the row wrapper sequences row evaluation before
         # column evaluation, just as the two original [] expressions do.
@@ -429,7 +638,15 @@ class Instrumenter:
                 index += 1
         for index, stmt in enumerate(statements):
             self.statement(stmt, scope, deferred.get(index), jump_scope=jump_scope)
-        self.insert(end - 1, self.frame(scope, node.extent.end.line, "Fim do bloco"))
+        if not statements or not self.terminates(statements[-1]):
+            self.insert(end - 1, self.frame(scope, node.extent.end.line, "Fim do bloco"))
+
+    def terminates(self, node):
+        if node.kind in (self.K.RETURN_STMT, self.K.CXX_THROW_EXPR, self.K.BREAK_STMT, self.K.CONTINUE_STMT, self.K.GOTO_STMT): return True
+        children = self.children(node)
+        if node.kind == self.K.COMPOUND_STMT: return bool(children) and self.terminates(children[-1])
+        if node.kind == self.K.IF_STMT: return len(children) >= 3 and all(self.terminates(child) for child in children[-2:])
+        return False
 
     def body(self, node, scope, jump_scope=False):
         if node.kind == self.K.COMPOUND_STMT:
@@ -463,22 +680,22 @@ class Instrumenter:
                                     local[v[0]] = v
                         for body in self.children(sub):
                             if body.kind == K.COMPOUND_STMT and self.children(body):
+                                old_flags, self.ready_flags = self.ready_flags, set()
+                                first_edit = len(self.edits)
                                 self.call_guard(body, "lambda", self.children(sub))
                                 self.block(body, local, entry=True)
+                                self.hoist_flags(body, first_edit)
+                                self.ready_flags = old_flags
                         break
                 v = self.variable(var)
                 self.reads(var, scope)
                 if v:
-                    if jump_scope and v[3]:
-                        # A later case can bypass this declaration. Adding an
-                        # initialized readiness flag here would make valid C++
-                        # illegal, and reading the scalar would be unsafe.
-                        scope.pop(v[0], None)
-                        self.warnings.add("Escalares sem inicialização no escopo compartilhado de switch não são observados; use blocos por caso.")
-                        continue
                     scope[v[0]] = v
-                    guards.append(f"::runspect_auto::local({json.dumps(self.aliases.get(v[1],v[0]))});")
-                    if v[3]: guards.append(f"bool {v[3]}=false;")
+                    local = f"::runspect_auto::local({json.dumps(self.aliases.get(v[1],v[0]))});"
+                    guards.append(f"if(!::runspect_auto::constant_evaluation()) {{ {local} }}" if self.constexpr_function else local)
+                    if v[3]:
+                        self.ready_flags.add(v[3])
+                        guards.append(f"{v[3]}=false;")
             self.insert(self.end(node), "".join(guards) + self.frame(scope, node.location.line))
             return
         if kind == K.SWITCH_STMT:
@@ -503,7 +720,7 @@ class Instrumenter:
                 self.reads(expr, local)
             self.insert(node.extent.start.offset, self.frame(scope, node.location.line, "Seleção do switch"))
             self.body(body, local, jump_scope=True)
-            self.insert(self.end(node), self.frame(scope, node.location.line))
+            if not self.terminates(node): self.insert(self.end(node), self.frame(scope, node.location.line))
             return
         if kind in (K.CASE_STMT, K.DEFAULT_STMT):
             kids = self.children(node)
@@ -518,9 +735,7 @@ class Instrumenter:
             self.insert(node.extent.start.offset, self.frame(scope, node.location.line))
             return
         if kind in (K.FOR_STMT, K.CXX_FOR_RANGE_STMT, K.WHILE_STMT, K.DO_STMT, K.IF_STMT):
-            if kind == K.IF_STMT and any(t.spelling == "constexpr" for t in list(node.get_tokens())[:3]):
-                self.warnings.add("Condições constexpr são executadas sem instrumentação interna.")
-                return
+            compile_condition = kind == K.IF_STMT and any(t.spelling == "constexpr" for t in list(node.get_tokens())[:3])
             kids = self.children(node)
             local = dict(scope)
             # Last child is the body for loops; if has then and optional else.
@@ -570,29 +785,79 @@ class Instrumenter:
                         local[v[0]] = v
                 else:
                     self.reads(expr, local)
-                    if expr in conditions:
+                    if expr in conditions and not compile_condition and not self.constexpr_function:
                         search = ",true" if kind == K.IF_STMT and self.search_condition(expr) else ""
                         self.insert(expr.extent.start.offset, "::runspect_auto::condition(static_cast<bool>((")
                         self.insert(expr.extent.end.offset, "))," + str(expr.location.line) + search + ")")
             for body in bodies:
                 self.body(body, local)
-            self.insert(self.end(node), self.frame(scope, node.location.line))
+            if not self.terminates(node): self.insert(self.end(node), self.frame(scope, node.location.line))
             return
         if kind in (K.RETURN_STMT, K.BREAK_STMT, K.CONTINUE_STMT):
             self.insert(node.extent.start.offset, self.frame(scope, node.location.line))
             self.reads(node, scope)
+            if kind == K.RETURN_STMT and self.constexpr_guard:
+                expressions = self.children(node)
+                if expressions:
+                    expr = expressions[-1]
+                    self.insert(expr.extent.start.offset, "::runspect_auto::constexpr_result((")
+                    self.insert(expr.extent.end.offset, ")," + self.constexpr_guard + ")")
+                else:
+                    self.insert(node.extent.start.offset, f"if(!::runspect_auto::constant_evaluation()) delete {self.constexpr_guard};")
             return
-        if kind in (K.LABEL_STMT, K.GOTO_STMT, K.CXX_TRY_STMT):
-            # Don't rewrite declarations across jumps or exception boundaries.
-            self.warnings.add("Goto e tratamento de exceções têm acompanhamento parcial.")
+        if kind == K.LABEL_STMT:
+            kids = self.children(node)
+            if kids:
+                self.insert(kids[-1].extent.start.offset, self.frame(scope, node.location.line, "Rótulo " + node.spelling))
+                self.statement(kids[-1], scope, jump_scope=jump_scope)
+            return
+        if kind == K.GOTO_STMT:
+            self.insert(node.extent.start.offset, self.frame(scope, node.location.line, "Salto: " + self.text(node).rstrip(";")))
+            return
+        if kind == K.CXX_TRY_STMT:
+            self.insert(node.extent.start.offset, self.frame(scope, node.location.line, "Início do try"))
+            for child in self.children(node): self.statement(child, dict(scope))
+            self.insert(self.end(node), self.frame(scope, node.location.line, "Fim do try/catch"))
+            return
+        if kind == K.CXX_CATCH_STMT:
+            local = dict(scope)
+            for child in self.children(node):
+                if child.kind in (K.VAR_DECL, K.PARM_DECL):
+                    v = self.variable(child, initialized=True)
+                    if v: local[v[0]] = v
+                elif child.kind == K.COMPOUND_STMT:
+                    self.insert(child.extent.start.offset + 1, self.frame(local, node.location.line, "Captura de exceção"))
+                    self.block(child, local)
+            return
+        if kind == K.CXX_THROW_EXPR:
+            self.insert(node.extent.start.offset, self.frame(scope, node.location.line, "Lança exceção"))
             return
         # Readiness flags become true only after a write actually executes.
         self.reads(node, scope)
-        self.insert(self.end(node), self.initialize_written(node, scope) + self.snapshot_write(node, scope) + self.frame(scope, node.location.line, defer_graph=defer_graph) + self.match_written(node, scope))
+        self.insert(self.end(node), self.initialize_written(node, scope) + ("" if self.constexpr_function else self.snapshot_write(node, scope)) + self.frame(scope, node.location.line, defer_graph=defer_graph) + ("" if self.constexpr_function else self.match_written(node, scope)))
+
+    def hoist_flags(self, body, first_edit):
+        # A jump may skip an uninitialized scalar declaration. Its readiness
+        # flag belongs at function entry so instrumentation adds no forbidden
+        # initialization across labels/cases, and never reads the skipped value.
+        if self.ready_flags:
+            code = "".join(f"bool {name}=false;" for name in sorted(self.ready_flags))
+            offset = body.extent.start.offset + 1
+            self.edits.insert(first_edit, (offset, offset, code.encode("utf-8")))
 
     def call_guard(self, body, name, parameters):
+        if self.current_reachable and name != "main":
+            self.available.add("calls")
         self.serial += 1
         guard = self.prefix + "call_" + str(self.serial)
+        if self.constexpr_function:
+            self.constexpr_guard = guard
+            code = f"::runspect_auto::Call* {guard}=::runspect_auto::constant_evaluation() ? nullptr : ::runspect_auto::constexpr_call({json.dumps(name)},{body.location.line});"
+            for param in parameters:
+                if param.kind == self.K.PARM_DECL and self.variable(param, initialized=True) and param.type.kind not in (self.ci.TypeKind.LVALUEREFERENCE, self.ci.TypeKind.RVALUEREFERENCE):
+                    code += f"if({guard}) {guard}->local({json.dumps(param.spelling)});"
+            self.insert(body.extent.start.offset + 1, code)
+            return
         locals = []
         for param in parameters:
             if param.kind != self.K.PARM_DECL:
@@ -602,21 +867,83 @@ class Instrumenter:
                 locals.append(f"{guard}.local({json.dumps(v[0])});")
         self.insert(body.extent.start.offset+1,f"::runspect_auto::Call {guard}({json.dumps(name)},{body.location.line});" + "".join(locals))
 
+    def allocations(self, function):
+        for node in self.descendants(function):
+            if node.kind == self.K.CXX_NEW_EXPR and self.heap_tracking:
+                typ = node.type.get_pointee().get_canonical()
+                if not (self.record_definition(typ) or self.numeric(typ) or typ.kind == self.ci.TypeKind.ENUM): continue
+                tokens = [token.spelling for token in node.get_tokens()]
+                new_index = tokens.index("new") if "new" in tokens else 0
+                prefix = tokens[new_index + 1:]
+                boundary = next((index for index, token in enumerate(prefix) if token in ("(", "{")), len(prefix))
+                if "[" in prefix[:boundary] or prefix[:1] == ["("]:
+                    self.warnings.add("New[] e placement new mostram apenas referências, sem expandir a alocação.")
+                    continue
+                initialized = ("{" in tokens or "(" in tokens) and (self.numeric(typ) or typ.kind == self.ci.TypeKind.ENUM or self.aggregate_record(self.record_definition(typ)))
+                self.insert(node.extent.start.offset, "::runspect_auto::allocated((")
+                self.insert(node.extent.end.offset, ")," + ("true" if initialized else "false") + ")")
+            elif node.kind == self.K.CXX_DELETE_EXPR:
+                expressions = [child for child in self.children(node) if child.kind.is_expression()]
+                if expressions:
+                    expr = expressions[-1]
+                    self.insert(expr.extent.start.offset, "::runspect_auto::before_delete((")
+                    self.insert(expr.extent.end.offset, "))")
+
+    def constexpr_traceable(self, function, visiting=None):
+        # C++17 cannot use a non-literal RAII guard in a constexpr body. The
+        # runtime guard is retired by numeric returns, so reject every path
+        # that can leave through an exception, including constexpr callees.
+        if not self.numeric(function.result_type): return False
+        visiting = set() if visiting is None else set(visiting)
+        identity = function.get_usr()
+        if identity in visiting: return True
+        visiting.add(identity)
+        for node in self.descendants(function):
+            if node.kind in (self.K.CXX_THROW_EXPR, self.K.CXX_TRY_STMT, self.K.CXX_NEW_EXPR, self.K.CXX_DELETE_EXPR, self.K.LAMBDA_EXPR): return False
+            if node.kind == self.K.CALL_EXPR:
+                callee = node.referenced
+                if not callee or "constexpr" not in [token.spelling for token in callee.get_tokens()]: return False
+                definition = callee.get_definition()
+                if definition and self.own(definition) and not self.constexpr_traceable(definition, visiting): return False
+        return True
+
     def run(self):
         self.collect(self.unit.cursor)
+        self.reachable_functions()
         for function in self.functions:
             self.inspect_patterns(function)
+        for node in self.descendants(self.unit.cursor):
+            managed = any(name in node.type.get_canonical().spelling for name in ("std::unique_ptr<", "std::shared_ptr<"))
+            explicit_destructor = node.kind == self.K.CALL_EXPR and node.referenced and node.referenced.kind == self.K.DESTRUCTOR
+            direct_deallocation = node.kind == self.K.CALL_EXPR and node.spelling in ("operator delete", "operator delete[]")
+            placement = node.kind == self.K.CXX_NEW_EXPR and re.match(r"\s*(?:::\s*)?new\s*\(", self.text(node))
+            if managed or explicit_destructor or placement or direct_deallocation:
+                self.heap_tracking = False
+            if explicit_destructor or placement:
+                self.unsafe_lifetime = True
+        if not self.heap_tracking:
+            self.warnings.add("Ownership gerenciado, placement new ou destruição explícita: referências são identificadas, mas alocações não são expandidas automaticamente neste programa.")
+        if self.unsafe_lifetime:
+            self.warnings.add("Com destruição explícita ou placement new, registros, strings e containers permanecem opacos para evitar leituras fora do lifetime.")
+            self.globals = {name: value for name, value in self.globals.items()
+                            if self.variable_types[value[1]].kind == self.ci.TypeKind.POINTER or self.numeric(self.variable_types[value[1]]) or self.variable_types[value[1]].kind == self.ci.TypeKind.ENUM}
+        else:
+            for definition in self.records.values(): self.record_accessors(definition)
         self.sorting_vectors.intersection_update(self.mutated)
         self.aliases = {usr: name for usr, name in self.aliases.items() if usr not in self.mutated and self.alias_targets[usr] not in self.mutated}
         for function in self.functions:
+            self.current_reachable = function.get_usr() in self.reachable
             bodies = [c for c in self.children(function) if c.kind == self.K.COMPOUND_STMT]
             boundary = bodies[0].extent.start.offset if bodies else function.extent.end.offset
             tokens = [t.spelling for t in function.get_tokens() if t.extent.start.offset < boundary]
-            if "constexpr" in tokens or function.kind == self.K.FUNCTION_TEMPLATE:
-                self.warnings.add("Funções constexpr e templates são executados sem instrumentação interna.")
+            self.constexpr_function = "constexpr" in tokens
+            self.constexpr_guard = None
+            if self.constexpr_function and not self.constexpr_traceable(function):
+                self.warnings.add("Constexpr com retorno não numérico ou lifetime/exceções é observado somente pelo chamador.")
                 continue
-            scope = dict(self.globals)
-            for param in function.get_arguments() or []:
+            parameters = list(function.get_arguments() or []) or [child for child in self.children(function) if child.kind == self.K.PARM_DECL]
+            scope = {name: value for name, value in self.globals.items() if self.global_offsets[value[1]] < function.extent.start.offset}
+            for param in parameters:
                 v = self.variable(param, initialized=True)
                 if v:
                     scope[v[0]] = v
@@ -624,8 +951,17 @@ class Instrumenter:
                 if body.kind == self.K.COMPOUND_STMT:
                     if function.spelling == "main":
                         self.insert(body.extent.start.offset + 1, "::runspect_auto::start(); ::runspect_auto::Completion " + self.prefix + "completion;")
-                    self.call_guard(body,function.spelling,function.get_arguments() or [])
+                    first_edit = len(self.edits)
+                    self.ready_flags = set()
+                    if not self.constexpr_function: self.allocations(function)
+                    self.call_guard(body,function.spelling,parameters)
                     self.block(body, scope, entry=True)
+                    self.hoist_flags(body, first_edit)
+        for usr in self.observed:
+            capability = self.observed_capability(usr)
+            if capability:
+                self.available.add(capability)
+            if self.reference_type(self.variable_types[usr]): self.available.add("references")
         # Multiple insertions at the same position must preserve discovery order.
         output = bytearray(self.source)
         for _, (start, end, text) in sorted(enumerate(self.edits), key=lambda item: (item[1][0], item[1][1] > item[1][0], item[0]), reverse=True):
@@ -638,6 +974,7 @@ def main():
     parser.add_argument("source")
     parser.add_argument("--runtime", default="")
     parser.add_argument("--cache", default="")
+    parser.add_argument("--analyze-only", action="store_true")
     args = parser.parse_args()
     try:
         ci, resources = load_clang(args.runtime)
@@ -663,14 +1000,17 @@ def main():
             if sub.kind == ci.CursorKind.CALL_EXPR and sub.referenced:
                 parent = sub.referenced.semantic_parent
                 if parent and parent.kind == ci.CursorKind.NAMESPACE and parent.spelling == "viz":
-                    print(json.dumps({"mode": "manual"}))
+                    tool.collect(unit.cursor)
+                    tool.reachable_functions()
+                    print(json.dumps({"mode": "manual", "capabilities": tool.source_capabilities(manual=True)}))
                     return 0
     output = tool.run()
     # GCC cannot load a PCH from inside another header. Keep this include at
     # translation-unit level, before the instrumentation header and C++ tokens.
     prefix = b'#include <bits/stdc++.h>\n' if stdlib_first(source) else b''
-    Path(path).write_bytes(prefix + b'#include "automatic.h"\n#line 1 "solution.cpp"\n' + output)
-    print(json.dumps({"mode": "automatic", "warnings": sorted(tool.warnings)}))
+    if not args.analyze_only:
+        Path(path).write_bytes(prefix + b'#include "automatic.h"\n#line 1 "solution.cpp"\n' + output)
+    print(json.dumps({"mode": "automatic", "warnings": sorted(tool.warnings), "capabilities": tool.source_capabilities()}))
     return 0
 
 

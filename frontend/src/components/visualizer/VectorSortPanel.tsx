@@ -45,7 +45,12 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
   const inferred = inferStructureView({ kind: vector.kind });
   const view = choice === 'auto' ? (['set', 'deque', 'stack', 'queue', 'priority', 'string', 'union-find', 'binary-tree'].includes(inferred) ? inferred : 'cells') : choice;
   const compact = vector.items.length > COMPACT_THRESHOLD;
-  const rendered = vector.items.slice(0, MAX_RENDERED_CELLS);
+  const activeIndex = vector.operation && 'index' in vector.operation ? vector.operation.index : vector.operation && 'a' in vector.operation ? vector.operation.a : 0;
+  const [navigation, setNavigation] = useState({ activeIndex, page: Math.floor(activeIndex / MAX_RENDERED_CELLS) });
+  const pages = Math.max(1, Math.ceil(vector.items.length / MAX_RENDERED_CELLS));
+  const page = Math.min(navigation.activeIndex === activeIndex ? navigation.page : Math.floor(activeIndex / MAX_RENDERED_CELLS), pages - 1);
+  const begin = page * MAX_RENDERED_CELLS;
+  const rendered = vector.items.slice(begin, begin + MAX_RENDERED_CELLS);
   const operation = describeOperation(vector.operation, vector);
 
   return (
@@ -86,11 +91,7 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
       )}
       {vector.changes?.some(change => change.kind === 'removed') && <div className="structure-removals" role="status">{vector.changes.filter(change => change.kind === 'removed').slice(0, 16).map(change => <span className="structure-change-removed" key={change.index}>− [{change.index}] {change.before}</span>)}</div>}
       {!!vector.truncated && <div className="vector-note">+{vector.truncated} elementos não capturados</div>}
-      {vector.items.length > MAX_RENDERED_CELLS && (
-        <div className="vector-note">
-          exibindo os primeiros {MAX_RENDERED_CELLS} de {vector.items.length} elementos
-        </div>
-      )}
+      {view === 'cells' && pages > 1 && <div className="structure-pagination" aria-label={`Paginação do vetor ${vector.name}`}><button type="button" disabled={page === 0} onClick={() => setNavigation({ activeIndex, page: page - 1 })} aria-label={`Página anterior do vetor ${vector.name}`}>←</button><span>elementos {begin}–{begin + rendered.length - 1} de {vector.items.length} · página {page + 1} / {pages}</span><button type="button" disabled={page === pages - 1} onClick={() => setNavigation({ activeIndex, page: page + 1 })} aria-label={`Próxima página do vetor ${vector.name}`}>→</button></div>}
       {vector.caption && (
         <p className="vector-caption" role="status">
           {vector.caption}
@@ -98,7 +99,7 @@ function VectorView({ vector }: { vector: VectorSnapshot }) {
       )}
       {vector.result && (
         <p className="vector-result">
-          resultado: {vector.result.slice(0, MAX_RENDERED_CELLS).map((value, index) => vector.items[index]?.displayValue ?? value).join(', ')}
+          resultado: {vector.result.slice(view === 'cells' ? begin : 0, (view === 'cells' ? begin : 0) + MAX_RENDERED_CELLS).map((value, index) => vector.items[index + (view === 'cells' ? begin : 0)]?.displayValue ?? value).join(', ')}
           {vector.result.length > MAX_RENDERED_CELLS ? ' …' : ''}
         </p>
       )}
