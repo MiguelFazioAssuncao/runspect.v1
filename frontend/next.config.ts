@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   ...(isGitHubPages
     ? { output: "export", trailingSlash: true }
     : {
+        // Analysis and two compilation attempts can exceed Next's 30s default.
+        experimental: { proxyTimeout: 120_000 },
         async rewrites() {
           return [
             {

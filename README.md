@@ -86,6 +86,8 @@ Testes com compilador: `cd frontend && npm run test:cpp`. Para testar também a 
 
 `npm run test:study` inicia servidores locais temporários, usa Chromium e verifica o editor Monaco real, salvamento após recarregar, entrada isolada por aba, busca sem acentos, execução C++, saída esperada, importação/exportação, cancelamento e layout móvel. Requer o módulo `playwright` disponível ou `PLAYWRIGHT_MODULE` apontando para seu `index.mjs`; `CHROMIUM` pode definir o binário (padrão `/usr/bin/chromium`). `RUNSPECT_SCREENSHOTS` define onde guardar capturas. Esse teste usa somente programas confiáveis em um backend temporário sem namespaces.
 
+`npm run test:proxy` usa servidores temporários para verificar que o proxy real do Next entrega uma resposta da API após 31 segundos, sem encerrá-la no limite padrão de 30 segundos.
+
 ## Próximas evoluções
 
 - Exercícios com múltiplos casos e validadores específicos para problemas com várias saídas válidas; a comparação atual é apenas com uma amostra.
