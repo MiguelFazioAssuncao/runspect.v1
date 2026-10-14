@@ -127,6 +127,32 @@ try {
   await page.getByText('Projeto inválido.', { exact: true }).waitFor();
   assert.equal(await getCode(), savedCode);
   console.log('PASS tab input isolation, export/import and invalid-file recovery');
+  await setCode('#include "visualizer.h"\nint main() { if (false) viz::step("não executado"); std::cout << "resultado sem passos\\n"; }');
+  await page.getByLabel('Entrada padrão do programa').fill('');
+  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+  const noStepsResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/run');
+  await confirmAllVisualizations(page);
+  const noStepsResult = await (await noStepsResponse).json();
+  assert.equal(noStepsResult.success, true, JSON.stringify(noStepsResult));
+  assert.equal(noStepsResult.trace_mode, 'manual');
+  assert.equal(noStepsResult.steps.length, 0);
+  await page.waitForFunction(() => document.querySelector('.terminal-output')?.textContent.includes('resultado sem passos'));
+  console.log('PASS program output remains visible when no visualization events execute');
+
+  await setCode('#include <iostream>\nint main() {\n  std::cout << "antes da falha" << std::endl;\n  int value;\n  std::cin >> value;\n  std::cout << value;\n}');
+  await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
+  const failedResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/run');
+  await confirmAllVisualizations(page);
+  const failedResult = await (await failedResponse).json();
+  assert.equal(failedResult.success, false);
+  assert.ok(failedResult.steps.length > 0);
+  await page.getByLabel('Posição na linha do tempo').press('End');
+  await page.waitForFunction(() => {
+    const terminal = document.querySelector('.terminal-output')?.textContent ?? '';
+    return terminal.includes('antes da falha') && terminal.includes('Entrada insuficiente na linha 5');
+  });
+  assert.ok(await page.locator('.terminal-panel-error').isVisible());
+  console.log('PASS runtime failures preserve partial stdout and the timeline leading to the error');
 
   await setCode('#include <iostream>\nint main() { while (true) {} }');
   await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();

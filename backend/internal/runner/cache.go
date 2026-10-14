@@ -77,7 +77,7 @@ func (r *CppRunner) cacheKey(code string, header []byte) [32]byte {
 	hash := sha256.New()
 	// Hash components separately so boundaries cannot collide. Invalidate when
 	// source, instrumentation, headers or compiler runtime configuration changes.
-	for _, data := range [][]byte{[]byte(code), header, []byte(r.ClangRuntimePath), []byte(r.CompilerCachePath), []byte("g++ -O0 -pipe -std=c++17")} {
+	for _, data := range [][]byte{[]byte(code), header, []byte(r.ClangRuntimePath), []byte(r.CompilerCachePath), []byte("g++ -O0 -pipe -std=c++17 -DRUNSPECT_TRACE_FD=3")} {
 		sum := sha256.Sum256(data)
 		hash.Write(sum[:])
 	}

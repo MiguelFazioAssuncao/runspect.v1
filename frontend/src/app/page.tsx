@@ -99,7 +99,7 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
     return match ? { flow: Number(match[1]), cost: Number(match[2]) } : null;
   }, [player.logs]);
 
-  const consoleOutput = player.programConsole.output || (player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1 ? fallbackOutput : '');
+  const consoleOutput = player.programConsole.output || (player.totalSteps === 0 || player.currentStepIndex === player.totalSteps - 1 ? fallbackOutput : '');
   const { hasGraph, hasVectors, hasStructs, hasVisualization, hasConsole, hasAnalysis, hasContent, structs: visibleStructs, matrices, calls, references } = selectVisualizationContent({ ...player, programConsole: { ...player.programConsole, output: consoleOutput } }, selection);
   const hasSelection = Object.values(selection).some(Boolean);
 
@@ -480,19 +480,19 @@ export default function Home() {
       setBackendStatus('connected');
       setTraceMode(result.trace_mode);
       setRunId((id) => id + 1);
+      const capturedSteps = result.steps ?? [];
+      const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
+      setExecutedCode(source);
+      setExecutedInput(input);
+      setSteps(capturedSteps);
+      setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
       if (!response.ok || !result.success) {
-        setSteps([]);
         setHasError(true);
-        const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
-        setOutput(`${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`);
+        setOutput(terminalOutput(result.output ?? '', `${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`, true));
       } else {
-        setExecutedCode(source);
-        setExecutedInput(input);
         if (editorTab === 'examples') setSampleRun({ exampleId: selectedExampleId, code: source, stdin: input, output: result.output ?? '' });
-        setSteps(result.steps ?? []);
-        setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
-        const warnings = result.trace_warnings?.length ? `\n${result.trace_warnings.join('\n')}` : '';
-        setOutput(`Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`);
+        const status = `Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`;
+        setOutput(capturedSteps.length ? status : terminalOutput(result.output ?? '', status, true));
       }
     } catch (error) {
       if (controller.signal.aborted) {

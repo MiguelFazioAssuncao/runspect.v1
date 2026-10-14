@@ -24,6 +24,7 @@
 #include <stack>
 #include <tuple>
 #include <streambuf>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <unistd.h>
@@ -44,11 +45,13 @@ class TraceBuffer : public std::streambuf {
         return written == count;
     }
     std::streamsize xsputn(const char* data, std::streamsize count) override {
-        pending.append(data,static_cast<size_t>(count));
-        auto end = pending.find_last_of('\n');
+        const auto size = static_cast<size_t>(count);
+        pending.append(data, size);
+        auto end = std::string_view(data, size).find_last_of('\n');
         if (end != std::string::npos) {
-            if (!write_all(pending.data(),static_cast<std::streamsize>(end+1))) return 0;
-            pending.erase(0,end+1);
+            const auto complete = pending.size() - size + end + 1;
+            if (!write_all(pending.data(),static_cast<std::streamsize>(complete))) return 0;
+            pending.erase(0,complete);
         }
         return count;
     }

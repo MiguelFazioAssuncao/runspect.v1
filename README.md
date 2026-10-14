@@ -35,6 +35,8 @@ npm run dev
 
 Acesse `http://localhost:3000`. O Next encaminha `/api/*` e `/healthz` para `http://127.0.0.1:8080`. Nenhuma chave de API é necessária. O template e os exemplos usam `bits/stdc++.h`; a exponenciação modular também usa `__int128`, extensões atendidas pelo GCC do executor.
 
+O proxy permite até 120 segundos por requisição para acomodar a análise e as tentativas de compilação. Cada tentativa de compilação tem limite de 30 segundos; o programa mantém o limite de 3 segundos de execução. A saída C++ preserva espaços, quebras de linha e JSON. Quando há erro, a saída parcial e os passos capturados continuam disponíveis para investigação.
+
 O Monaco é uma dependência local: `predev` e `prebuild` copiam sua distribuição para `public/monaco`. Não edite esses arquivos gerados. Fontes do sistema eliminam downloads de fontes no build. Se o editor completo não carregar, **Usar editor simples** mantém a edição de texto disponível. Executar C++ continua exigindo acesso ao backend; isso não é um executor offline no navegador.
 
 ## Configuração e publicação
@@ -49,7 +51,7 @@ O Monaco é uma dependência local: `predev` e `prebuild` copiam sua distribuiç
 | `PORT` | Porta do backend quando `RUNSPECT_ADDR` não é definido | não definido |
 | `RUNSPECT_ALLOWED_ORIGINS` | Origens CORS separadas por vírgula | localhost e 127.0.0.1 na porta 3000 |
 | `RUNSPECT_MAX_CONCURRENT` | Execuções/análises simultâneas | metade das CPUs, mínimo 1 |
-| `RUNSPECT_COMPILE_TIMEOUT_SEC` | Tempo por tentativa de compilação | 10 |
+| `RUNSPECT_COMPILE_TIMEOUT_SEC` | Tempo por tentativa de compilação | 30 |
 | `RUNSPECT_ANALYSIS_TIMEOUT_SEC` | Tempo de análise Clang | 30 |
 | `RUNSPECT_SANDBOX` | `off` somente para desenvolvimento com código confiável | isolamento ativado |
 
