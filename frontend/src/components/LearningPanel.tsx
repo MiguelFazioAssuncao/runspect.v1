@@ -23,11 +23,12 @@ export function LearningPanel({ example, code, stdin, sampleRun, completed, onCo
   const matches = checked && matchesSampleOutput(sampleRun.output, example.expectedOutput);
 
   return <section className="learning-panel" aria-label="Guia de estudo">
-    <div className="learning-heading"><strong>{example.name}</strong><button type="button" onClick={onRestore}>Restaurar exemplo</button></div>
+    <div className="learning-heading"><strong>{example.name}</strong>{(code !== example.code || stdin !== example.stdin) && <span className="learning-draft-tag">Exemplo editado</span>}<button type="button" onClick={onRestore}>Restaurar exemplo</button></div>
     <p>{example.description}</p>
     <div className="learning-meta"><span>Tempo: {example.timeComplexity}</span><span>Memória: {example.memoryComplexity}</span></div>
     <details key={example.id}>
       <summary>Como estudar esta técnica</summary>
+      <div className="learning-details-content">
       {guide && <div className="learning-guide">
         <p><strong>Quando usar</strong>{guide.use}</p>
         <p><strong>Observe os passos</strong>{guide.observe}</p>
@@ -42,6 +43,7 @@ export function LearningPanel({ example, code, stdin, sampleRun, completed, onCo
       <div className="learning-progress"><label><input type="checkbox" checked={completed.includes(example.id)} onChange={onComplete} />Já consigo explicar esta técnica</label>
         {path && <span>{path.name}: {path.ids.filter(id => completed.includes(id)).length}/{path.ids.length}</span>}
         {next && <button type="button" onClick={() => onSelect(next)}>Continuar trilha</button>}
+      </div>
       </div>
     </details>
   </section>;

@@ -3,9 +3,11 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CircleHelp, Clock3, Network, SlidersHorizontal } from 'lucide-react';
 import { LearningPanel } from '@/components/LearningPanel';
+import { StudyPaths } from '@/components/StudyPaths';
 import type { SampleRun } from '@/components/LearningPanel';
 import { useStudyProject } from '@/hooks/useStudyProject';
 import { MAX_PROJECT_BYTES, normalizeSearch, parseStudyProject, serializeStudyProject, validateProgram } from '@/lib/studyProject';
+import type { ProgramDraft } from '@/lib/studyProject';
 import { WorkspaceSplit } from '@/components/workspace/WorkspaceSplit';
 import { PanelInteractionContext, ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { flushSync } from 'react-dom';
@@ -168,20 +170,27 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'references', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
-  const { project, status: saveStatus, updateProject } = useStudyProject();
-  const [exampleCode, setExampleCode] = useState(examples[0].code);
-  const [exampleStdin, setExampleStdin] = useState(examples[0].stdin);
+  const { project, status: saveStatus, error: saveError, updateProject } = useStudyProject();
+  const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
+  const selectedExample = examples.find(example => example.id === selectedExampleId) ?? examples[0];
+  const exampleDraft = project.exampleDrafts?.[selectedExampleId] ?? selectedExample;
   const [tracePreset, setTracePreset] = useState<TracePreset>('standard');
   const [editorTab, setEditorTab] = useState<'custom' | 'examples'>('custom');
-  const code = editorTab === 'custom' ? project.code : exampleCode;
-  const stdin = editorTab === 'custom' ? project.stdin : exampleStdin;
-  const setCode = (value: string) => editorTab === 'custom' ? updateProject({ code: value }) : setExampleCode(value);
-  const setStdin = (value: string) => editorTab === 'custom' ? updateProject({ stdin: value }) : setExampleStdin(value);
+  const code = editorTab === 'custom' ? project.code : exampleDraft.code;
+  const stdin = editorTab === 'custom' ? project.stdin : exampleDraft.stdin;
+  const editExample = (update: Partial<ProgramDraft>) => {
+    const draft = { code: exampleDraft.code, stdin: exampleDraft.stdin, ...update };
+    const exampleDrafts = { ...project.exampleDrafts };
+    if (draft.code === selectedExample.code && draft.stdin === selectedExample.stdin) delete exampleDrafts[selectedExampleId];
+    else exampleDrafts[selectedExampleId] = draft;
+    updateProject({ exampleDrafts });
+  };
+  const setCode = (value: string) => editorTab === 'custom' ? updateProject({ code: value }) : editExample({ code: value });
+  const setStdin = (value: string) => editorTab === 'custom' ? updateProject({ stdin: value }) : editExample({ stdin: value });
   const [projectNotice, setProjectNotice] = useState('');
   const [sampleRun, setSampleRun] = useState<SampleRun | null>(null);
   const [executedCode, setExecutedCode] = useState('');
   const [executedInput, setExecutedInput] = useState('');
-  const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
   const [exampleQuery, setExampleQuery] = useState('');
   const [exampleCategory, setExampleCategory] = useState('todas');
   const [conversionNotice, setConversionNotice] = useState('');
@@ -238,8 +247,21 @@ export default function Home() {
 
   const selectExample = (example: ExampleItem) => {
     setSelectedExampleId(example.id);
-    setExampleCode(example.code);
-    setExampleStdin(example.stdin);
+  };
+
+  const openExample = (id: string) => {
+    const example = examples.find(item => item.id === id);
+    if (!example) return;
+    setExampleCategory('todas');
+    setExampleQuery('');
+    setEditorTab('examples');
+    selectExample(example);
+  };
+
+  const restoreExample = () => {
+    const exampleDrafts = { ...project.exampleDrafts };
+    delete exampleDrafts[selectedExampleId];
+    updateProject({ exampleDrafts });
   };
 
   const changeExampleCategory = (category: string) => {
@@ -540,9 +562,9 @@ export default function Home() {
     try {
       if (file.size > MAX_PROJECT_BYTES) throw new Error('O projeto excede 512 KiB.');
       const imported = parseStudyProject(await file.text());
-      updateProject(imported);
+      updateProject({ ...imported, exampleDrafts: imported.exampleDrafts ?? {} });
       setEditorTab('custom');
-      setProjectNotice('Projeto aberto. Código, entrada e progresso foram restaurados.');
+      setProjectNotice('Projeto aberto. Código, entrada, rascunhos e progresso foram restaurados.');
     } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível abrir o projeto.'); }
   };
 
@@ -587,11 +609,20 @@ export default function Home() {
       <WorkspaceSplit>
         <div className="editor-column">
           <div className="editor-header">
-            <div className="editor-tabs" role="tablist" aria-label="Fonte do código">
+            <div className="editor-tabs" role="tablist" aria-label="Fonte do código" onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const tab = event.key === 'Home' ? 'custom' : event.key === 'End' ? 'examples' : editorTab === 'custom' ? 'examples' : 'custom';
+              setEditorTab(tab);
+              event.currentTarget.querySelector<HTMLButtonElement>(`#source-tab-${tab}`)?.focus();
+            }}>
               <button
                 className={`editor-tab ${editorTab === 'custom' ? 'editor-tab-active' : ''}`}
                 onClick={() => setEditorTab('custom')}
                 role="tab"
+                id="source-tab-custom"
+                aria-controls="source-workspace"
+                tabIndex={editorTab === 'custom' ? 0 : -1}
                 aria-selected={editorTab === 'custom'}
               >
                 seu código
@@ -600,6 +631,9 @@ export default function Home() {
                 className={`editor-tab ${editorTab === 'examples' ? 'editor-tab-active' : ''}`}
                 onClick={() => setEditorTab('examples')}
                 role="tab"
+                id="source-tab-examples"
+                aria-controls="source-workspace"
+                tabIndex={editorTab === 'examples' ? 0 : -1}
                 aria-selected={editorTab === 'examples'}
               >
                 técnicas
@@ -626,13 +660,19 @@ export default function Home() {
               </div>
             )}
           </div>
+          <div id="source-workspace" role="tabpanel" aria-labelledby={`source-tab-${editorTab}`} className="editor-tab-panel">
+          <StudyPaths completed={project.completed} onSelect={openExample} />
+          {editorTab === 'examples' && visibleExamples.length === 0 && <div className="example-empty" role="status">
+            <span>Nenhuma técnica corresponde aos filtros.</span>
+            <button type="button" onClick={() => { setExampleQuery(''); setExampleCategory('todas'); }}>Limpar filtros</button>
+          </div>}
           {editorTab === 'examples' && (() => {
             const example = examples.find((item) => item.id === selectedExampleId);
             if (!example) return null;
             return <LearningPanel example={example} code={code} stdin={stdin} sampleRun={sampleRun} completed={project.completed}
-              onRestore={() => selectExample(example)}
+              onRestore={restoreExample}
               onComplete={() => updateProject({ completed: project.completed.includes(example.id) ? project.completed.filter(id => id !== example.id) : [...project.completed, example.id] })}
-              onSelect={id => { const next = examples.find(item => item.id === id); if (next) { setExampleCategory('todas'); setExampleQuery(''); selectExample(next); } }} />;
+              onSelect={openExample} />;
           })()}
           {editorTab === 'custom' && (
             <div className="editor-actions">
@@ -657,12 +697,12 @@ export default function Home() {
             </div>
           )}
           <div className="project-actions">
-            <span role="status">{saveStatus === 'saving' ? 'Salvando…' : saveStatus === 'unavailable' ? 'Não foi possível salvar neste navegador. Baixe o projeto para guardar suas alterações.' : saveStatus === 'recovered' ? 'Não foi possível recuperar o rascunho salvo.' : editorTab === 'custom' ? 'Código e entrada salvos neste navegador' : 'Baixe o projeto para guardar suas edições do exemplo.'}</span>
+            <span role="status">{saveStatus === 'saving' ? 'Salvando…' : saveStatus === 'unavailable' ? saveError ? `Não foi possível salvar. ${saveError}` : 'Não foi possível salvar neste navegador. Baixe o projeto para guardar suas alterações.' : saveStatus === 'recovered' ? 'Não foi possível recuperar o rascunho salvo.' : editorTab === 'custom' ? 'Código e entrada salvos neste navegador' : 'Rascunhos das técnicas salvos neste navegador'}</span>
             <button type="button" onClick={() => {
               try {
                 validateProgram(code, stdin);
                 downloadFile(new Blob([serializeStudyProject({ ...project, code, stdin })], { type: 'application/json;charset=utf-8' }), 'runspect-projeto.json');
-                setProjectNotice('Projeto baixado com código, entrada e progresso.');
+                setProjectNotice('Projeto baixado com código, entrada, rascunhos e progresso.');
               } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível baixar o projeto.'); }
             }}>Baixar projeto</button>
             <button type="button" onClick={() => importRef.current?.click()} disabled={isLoading || isRecording}>Abrir projeto</button>
@@ -696,6 +736,7 @@ export default function Home() {
           </div>
           </ResizablePanel>
           <div className="trace-capture-settings"><label htmlFor="trace-capture-limit">Captura da visualização</label><select id="trace-capture-limit" value={tracePreset} disabled={isLoading || isRecording} onChange={event => setTracePreset(event.target.value as TracePreset)}>{Object.entries(TRACE_PRESETS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select><small>Capturas maiores podem levar mais tempo.</small></div>
+          </div>
         </div>
 
         <div

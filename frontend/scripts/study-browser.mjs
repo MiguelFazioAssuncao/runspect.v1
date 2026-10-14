@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, cp, mkdtemp, mkdir, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,8 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const root = fileURLToPath(new URL('../', import.meta.url));
 const backendRoot = fileURLToPath(new URL('../../backend/', import.meta.url));
 const temporary = await mkdtemp(join(tmpdir(), 'runspect-study-'));
-const evidence = process.env.RUNSPECT_SCREENSHOTS || join(temporary, 'screenshots');
+const serverRoot = join(temporary, 'frontend');
+const evidence = process.env.RUNSPECT_SCREENSHOTS || await mkdtemp(join(tmpdir(), 'runspect-study-evidence-'));
 const processes = [];
 let browser, page;
 let logs = '';
@@ -31,13 +32,20 @@ function start(command, args, cwd, env) {
 }
 async function healthy(url) {
   for (let attempt = 0; attempt < 160; attempt++) {
-    if (await fetch(url).then(response => response.ok).catch(() => false)) return;
+    if (await fetch(url, { signal: AbortSignal.timeout(1500) }).then(response => response.ok).catch(() => false)) return;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   throw new Error(`Server did not become ready: ${url}\n${logs}`);
 }
 
 try {
+  // Keep Next's lock, generated types and tsconfig changes out of the user's server.
+  await mkdir(serverRoot);
+  await Promise.all([
+    ...['package.json', 'next.config.ts', 'tsconfig.json', 'postcss.config.mjs'].map(file => copyFile(join(root, file), join(serverRoot, file))),
+    cp(join(root, 'src'), join(serverRoot, 'src'), { recursive: true }),
+    ...['public', 'node_modules'].map(directory => symlink(join(root, directory), join(serverRoot, directory), 'dir')),
+  ]);
   const build = spawnSync('go', ['build', '-o', join(temporary, 'backend'), './cmd/server'], { cwd: backendRoot, env: { ...process.env, GOCACHE: '/tmp/runspect-go-cache' }, encoding: 'utf8', timeout: 120000 });
   assert.equal(build.status, 0, build.stderr);
   const apiPort = await freePort();
@@ -45,7 +53,7 @@ try {
   const origin = `http://127.0.0.1:${port}`;
   start(join(temporary, 'backend'), [], backendRoot, { RUNSPECT_ADDR: `127.0.0.1:${apiPort}`, RUNSPECT_SANDBOX: 'off', RUNSPECT_ALLOWED_ORIGINS: origin, RUNSPECT_RATE_PER_MIN: '1000' });
   await healthy(`http://127.0.0.1:${apiPort}/healthz`);
-  start(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(port)], root, { RUNSPECT_API_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_RUNSPECT_API_URL: '', NEXT_PUBLIC_BASE_PATH: '' });
+  start(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(port)], serverRoot, { RUNSPECT_API_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_RUNSPECT_API_URL: '', NEXT_PUBLIC_BASE_PATH: '' });
   await healthy(origin);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -61,10 +69,8 @@ try {
   const editorReady = () => page.waitForFunction(() => window.monaco?.editor.getModels().length > 0 && document.querySelector('.monaco-editor'));
   await editorReady();
   const setCode = async code => {
-    await page.locator('.monaco-editor').getByRole('textbox').first().focus();
-    await page.keyboard.press('ControlOrMeta+Home');
-    await page.keyboard.press('ControlOrMeta+A');
-    await page.keyboard.insertText(code);
+    // Load fixtures through the real model without Monaco reindenting bulk typing.
+    await page.evaluate(code => window.monaco.editor.getModels()[0].setValue(code), code);
   };
   const getCode = () => page.evaluate(() => window.monaco.editor.getModels()[0].getValue());
   const expandInput = async () => {
@@ -72,6 +78,13 @@ try {
     if (await button.isVisible()) await button.click();
   };
   const savedCode = '#include <iostream>\nint main() { int n; std::cin >> n; std::cout << n * 2 << "\\n"; }\n';
+  await page.getByRole('tab', { name: 'seu código', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', { name: 'técnicas', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('Home');
+  assert.equal(await page.getByRole('tab', { name: 'seu código', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.ok(await page.getByRole('tab', { name: 'seu código', exact: true }).evaluate(element => document.activeElement === element));
+  console.log('PASS keyboard tab navigation preserves focus and selection');
   await setCode(savedCode);
   await expandInput();
   await page.getByLabel('Entrada padrão do programa').fill('21\n');
@@ -82,6 +95,35 @@ try {
   await expandInput();
   assert.equal(await page.getByLabel('Entrada padrão do programa').inputValue(), '21\n');
   console.log('PASS custom draft survives reload with its exact input');
+
+  await page.getByText('Trilhas de estudo', { exact: true }).click();
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: join(evidence, 'study-paths-desktop.png'), fullPage: true });
+  await page.getByRole('button', { name: /^Fundamentos/ }).click();
+  assert.equal(await page.getByRole('tab', { name: 'técnicas', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByLabel('Selecionar técnica de programação competitiva').inputValue(), 'bubble-sort');
+  await page.getByText('Trilhas de estudo', { exact: true }).click();
+  const originalSortCode = await getCode();
+  const sortDraft = `${originalSortCode}\n// Meu experimento com ordenação\n`;
+  await setCode(sortDraft);
+  await expandInput();
+  await page.getByLabel('Entrada padrão do programa').fill('3\n3 2 1\n');
+  await page.getByLabel('Selecionar técnica de programação competitiva').selectOption('binary-search');
+  await page.getByLabel('Selecionar técnica de programação competitiva').selectOption('bubble-sort');
+  assert.equal(await getCode(), sortDraft);
+  assert.equal(await page.getByLabel('Entrada padrão do programa').inputValue(), '3\n3 2 1\n');
+  await page.waitForFunction(code => JSON.parse(localStorage.getItem('runspect.study.v1') || '{}').exampleDrafts?.['bubble-sort']?.code === code, sortDraft);
+  await page.reload();
+  await editorReady();
+  await page.getByRole('tab', { name: 'técnicas', exact: true }).click();
+  assert.equal(await getCode(), sortDraft);
+  await expandInput();
+  assert.equal(await page.getByLabel('Entrada padrão do programa').inputValue(), '3\n3 2 1\n');
+  await page.getByLabel('Buscar exemplos').fill('sem-resultados-xyz');
+  await page.getByRole('button', { name: 'Limpar filtros', exact: true }).click();
+  assert.equal(await page.getByLabel('Buscar exemplos').inputValue(), '');
+  assert.equal(await getCode(), sortDraft);
+  console.log('PASS learning paths, filter recovery and independent example drafts survive switching and reload');
 
   await page.getByRole('tab', { name: 'técnicas', exact: true }).click();
   await page.getByLabel('Buscar exemplos').fill('binaria');
@@ -120,6 +162,7 @@ try {
   assert.equal(exported.code, savedCode);
   assert.equal(exported.stdin, '21\n');
   assert.ok(exported.completed.includes('binary-search'));
+  assert.equal(exported.exampleDrafts['bubble-sort'].code, sortDraft);
   await setCode('int main() {}');
   await page.getByLabel('Arquivo de projeto').setInputFiles(file);
   await page.waitForFunction(code => window.monaco.editor.getModels()[0].getValue() === code, savedCode);
@@ -127,6 +170,26 @@ try {
   await page.getByText('Projeto inválido.', { exact: true }).waitFor();
   assert.equal(await getCode(), savedCode);
   console.log('PASS tab input isolation, export/import and invalid-file recovery');
+
+  await page.getByRole('tab', { name: 'técnicas', exact: true }).click();
+  await page.getByLabel('Buscar exemplos').fill('');
+  await page.getByLabel('Selecionar técnica de programação competitiva').selectOption('bubble-sort');
+  assert.equal(await getCode(), sortDraft);
+  await page.getByRole('button', { name: 'Restaurar exemplo', exact: true }).click();
+  assert.equal(await getCode(), originalSortCode);
+  await page.getByLabel('Selecionar técnica de programação competitiva').selectOption('binary-search');
+  assert.notEqual(await getCode(), originalSortCode);
+  await page.getByRole('tab', { name: 'seu código', exact: true }).click();
+  assert.equal(await getCode(), savedCode);
+  console.log('PASS project restores all example drafts and resetting one preserves the custom program');
+
+  const legacyProject = { ...exported };
+  delete legacyProject.exampleDrafts;
+  await page.getByLabel('Arquivo de projeto').setInputFiles({ name: 'legacy.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(legacyProject)) });
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('runspect.study.v1') || '{}').exampleDrafts && Object.keys(JSON.parse(localStorage.getItem('runspect.study.v1')).exampleDrafts).length === 0);
+  assert.equal(await getCode(), savedCode);
+  console.log('PASS legacy imports replace example drafts and preserve the custom program and progress');
+
   await setCode('#include "visualizer.h"\nint main() { if (false) viz::step("não executado"); std::cout << "resultado sem passos\\n"; }');
   await page.getByLabel('Entrada padrão do programa').fill('');
   await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
@@ -163,6 +226,8 @@ try {
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('tab', { name: 'técnicas', exact: true }).click();
+  await page.getByLabel('Buscar exemplos').fill('binaria');
+  await page.getByLabel('Selecionar técnica de programação competitiva').selectOption('binary-search');
   await page.getByRole('button', { name: 'Restaurar exemplo', exact: true }).click();
   await page.getByText('Como estudar esta técnica', { exact: true }).click();
   await page.getByRole('button', { name: 'Executar Algoritmo', exact: true }).click();
@@ -174,7 +239,9 @@ try {
   assert.ok(width.document <= width.viewport, JSON.stringify(width));
   await page.screenshot({ path: join(evidence, 'study-mobile.png'), fullPage: true });
   await page.setViewportSize({ width: 360, height: 800 });
+  await page.getByText('Trilhas de estudo', { exact: true }).click();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.screenshot({ path: join(evidence, 'study-paths-mobile.png'), fullPage: true });
   assert.deepEqual(external, [], 'Editor must not depend on external CDN assets');
   assert.deepEqual(errors, [], 'Browser runtime errors');
   console.log(`PASS mobile layout and local-only assets. Screenshots: ${evidence}`);
@@ -189,5 +256,9 @@ try {
 } finally {
   await browser?.close();
   for (const child of processes.reverse()) { try { process.kill(-child.pid, 'SIGTERM'); } catch {} }
+  await Promise.all(processes.map(child => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise(resolve => {
+    const timeout = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} resolve(); }, 5000);
+    child.once('close', () => { clearTimeout(timeout); resolve(); });
+  })));
   await rm(temporary, { recursive: true, force: true });
 }

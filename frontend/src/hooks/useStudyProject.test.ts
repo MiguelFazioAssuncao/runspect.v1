@@ -42,6 +42,22 @@ describe('study draft persistence', () => {
     expect(store.getSnapshot()).toMatchObject({ project: { code: 'my program' }, status: 'unavailable' });
     unsubscribe();
   });
+  it('keeps the last recoverable project when an example exceeds the limits, then recovers after correction', async () => {
+    const saved = { ...DEFAULT_STUDY_PROJECT, code: 'my custom program', stdin: '42' };
+    storage.set(STUDY_STORAGE_KEY, serializeStudyProject(saved));
+    const { studyProjectStore: store } = await import('./useStudyProject');
+    const unsubscribe = store.subscribe(vi.fn());
+    store.updateProject({ exampleDrafts: { dfs: { code: 'x'.repeat(160 * 1024 + 1), stdin: '' } } });
+    vi.advanceTimersByTime(400);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(JSON.parse(storage.get(STUDY_STORAGE_KEY)!)).toEqual(saved);
+    expect(store.getSnapshot()).toMatchObject({ status: 'unavailable', error: expect.stringContaining('160 KiB'), project: { code: saved.code } });
+    store.updateProject({ exampleDrafts: { dfs: { code: 'corrected', stdin: '' } } });
+    vi.advanceTimersByTime(400);
+    expect(store.getSnapshot().status).toBe('saved');
+    expect(JSON.parse(storage.get(STUDY_STORAGE_KEY)!)).toMatchObject({ code: saved.code, exampleDrafts: { dfs: { code: 'corrected' } } });
+    unsubscribe();
+  });
   it('does not overwrite corrupted storage until the user edits', async () => {
     storage.set(STUDY_STORAGE_KEY, 'invalid');
     const { studyProjectStore: store } = await import('./useStudyProject');
