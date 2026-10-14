@@ -10,7 +10,9 @@ Laboratório para aprender programação competitiva observando a execução de 
 4. Compare a saída com a referência. A comparação só vale para a entrada original e não substitui testes de correção; alguns problemas admitem várias respostas válidas.
 5. Marque as técnicas que já consegue explicar e continue uma das cinco trilhas.
 
-O código e a entrada da aba **seu código**, além do progresso de estudo, são salvos no navegador com uma pausa de 400 ms após a edição. Ao sair da página, as alterações pendentes são gravadas. **Baixar projeto** exporta o código e a entrada da aba atual junto com o progresso; **Abrir projeto** restaura esse arquivo. Edições de exemplos permanecem durante a sessão, mas precisam ser exportadas para sobreviver ao recarregamento. O armazenamento é local ao navegador, não uma conta na nuvem. Abas diferentes mantêm rascunhos independentes em memória e a última gravação determina o rascunho recuperado.
+**Trilhas de estudo** mostra o progresso de cada caminho e abre a próxima técnica pendente. As abas **seu código** e **técnicas** também aceitam as setas do teclado, `Home` e `End`.
+
+O código e a entrada da aba **seu código**, os rascunhos de cada técnica e o progresso de estudo são salvos no navegador com uma pausa de 400 ms após a edição. Ao sair da página, as alterações pendentes são gravadas. Trocar de técnica e recarregar preserva as edições. **Restaurar exemplo** descarta apenas o rascunho da técnica atual. **Baixar projeto** exporta o código e a entrada da aba atual junto com todos os rascunhos e o progresso; **Abrir projeto** restaura esse arquivo e continua aceitando projetos antigos. O arquivo completo tem limite de 512 KiB; se o código, a entrada ou o conjunto de rascunhos exceder os limites, o site informa o motivo e mantém a última gravação válida. O armazenamento é local ao navegador, não uma conta na nuvem. Abas diferentes mantêm rascunhos independentes em memória e a última gravação determina o projeto recuperado.
 
 ## Desenvolvimento local
 
@@ -84,7 +86,7 @@ go test ./...
 
 Testes com compilador: `cd frontend && npm run test:cpp`. Para testar também a instrumentação dos exemplos, defina `RUNSPECT_TEST_AUTOMATIC=1`. Os testes Go que exercitam isolamento precisam de um ambiente onde bubblewrap possa criar namespaces.
 
-`npm run test:study` inicia servidores locais temporários, usa Chromium e verifica o editor Monaco real, salvamento após recarregar, entrada isolada por aba, busca sem acentos, execução C++, saída esperada, importação/exportação, cancelamento e layout móvel. Requer o módulo `playwright` disponível ou `PLAYWRIGHT_MODULE` apontando para seu `index.mjs`; `CHROMIUM` pode definir o binário (padrão `/usr/bin/chromium`). `RUNSPECT_SCREENSHOTS` define onde guardar capturas. Esse teste usa somente programas confiáveis em um backend temporário sem namespaces.
+`npm run test:study` inicia servidores locais temporários e copia o frontend para uma pasta temporária, preservando o servidor de desenvolvimento aberto e seus arquivos gerados. Usa Chromium e verifica o editor Monaco real, rascunhos por técnica após trocar e recarregar, navegação por teclado, trilhas, entrada isolada por aba, busca sem acentos, execução C++, saída esperada, importação/exportação, cancelamento e layout móvel. Requer o módulo `playwright` disponível ou `PLAYWRIGHT_MODULE` apontando para seu `index.mjs`; `CHROMIUM` pode definir o binário (padrão `/usr/bin/chromium`). `RUNSPECT_SCREENSHOTS` define onde guardar capturas. Esse teste usa somente programas confiáveis em um backend temporário sem namespaces. O workflow de publicação executa lint e testes do frontend antes do build.
 
 `npm run test:proxy` usa servidores temporários para verificar que o proxy real do Next entrega uma resposta da API após 31 segundos, sem encerrá-la no limite padrão de 30 segundos.
 

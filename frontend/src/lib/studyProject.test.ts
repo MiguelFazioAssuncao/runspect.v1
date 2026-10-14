@@ -27,6 +27,26 @@ describe('portable study projects', () => {
   it('supports accent-insensitive searches', () => {
     expect(normalizeSearch('  Árvore BINÁRIA ')).toBe('arvore binaria');
   });
+
+  it('round-trips independent example drafts alongside the custom program', () => {
+    const project = { ...DEFAULT_STUDY_PROJECT, code: 'custom program', exampleDrafts: {
+      'binary-search': { code: '// my search', stdin: '  5\r\n' },
+      'bubble-sort': { code: '// my sort', stdin: '3 2 1\n' },
+    } };
+    expect(parseStudyProject(serializeStudyProject(project))).toEqual(project);
+  });
+
+  it.each([null, [], { 'bad/id': { code: '', stdin: '' } }, { dfs: { code: 4, stdin: '' } }, { dfs: { code: '', stdin: null } }].map(value => [value]))('rejects malformed example drafts: %j', exampleDrafts => {
+    expect(() => parseStudyProject(JSON.stringify({ ...DEFAULT_STUDY_PROJECT, exampleDrafts }))).toThrow();
+  });
+
+  it('limits example programs individually and the exported project as a whole', () => {
+    expect(() => parseStudyProject(JSON.stringify({ ...DEFAULT_STUDY_PROJECT, exampleDrafts: {
+      dfs: { code: '', stdin: 'x'.repeat(64 * 1024 + 1) },
+    } }))).toThrow('64 KiB');
+    const exampleDrafts = Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`example-${index}`, { code: 'x'.repeat(120 * 1024), stdin: '' }]));
+    expect(() => serializeStudyProject({ ...DEFAULT_STUDY_PROJECT, exampleDrafts })).toThrow('512 KiB');
+  });
 });
 
 describe('learning catalog consistency', () => {

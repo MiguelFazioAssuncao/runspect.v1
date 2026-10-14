@@ -1,10 +1,10 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_STUDY_PROJECT, parseStudyProject, serializeStudyProject, STUDY_STORAGE_KEY, validateProgram } from '@/lib/studyProject';
+import { DEFAULT_STUDY_PROJECT, parseStudyProject, serializeStudyProject, STUDY_STORAGE_KEY } from '@/lib/studyProject';
 import type { StudyProject } from '@/lib/studyProject';
 
-type Snapshot = { project: StudyProject; status: 'ready' | 'saved' | 'saving' | 'unavailable' | 'recovered' };
+type Snapshot = { project: StudyProject; status: 'ready' | 'saved' | 'saving' | 'unavailable' | 'recovered'; error?: string };
 const initial: Snapshot = { project: DEFAULT_STUDY_PROJECT, status: 'ready' };
 let snapshot = initial;
 let initialized = false;
@@ -16,9 +16,15 @@ function flush() {
   if (timer) clearTimeout(timer);
   timer = undefined;
   if (snapshot.status !== 'saving') return;
+  let source: string;
+  try { source = serializeStudyProject(snapshot.project); }
+  catch (error) {
+    snapshot = { ...snapshot, status: 'unavailable', error: error instanceof Error ? error.message : 'Não foi possível preparar o projeto para salvar.' };
+    emit();
+    return;
+  }
   try {
-    validateProgram(snapshot.project.code, snapshot.project.stdin);
-    window.localStorage.setItem(STUDY_STORAGE_KEY, serializeStudyProject(snapshot.project));
+    window.localStorage.setItem(STUDY_STORAGE_KEY, source);
     snapshot = { ...snapshot, status: 'saved' };
   } catch { snapshot = { ...snapshot, status: 'unavailable' }; }
   emit();
@@ -52,7 +58,7 @@ function subscribe(listener: () => void) {
   };
 }
 
-function updateProject(update: Partial<Pick<StudyProject, 'code' | 'stdin' | 'completed'>>) {
+function updateProject(update: Partial<Pick<StudyProject, 'code' | 'stdin' | 'completed' | 'exampleDrafts'>>) {
   snapshot = { project: { ...snapshot.project, ...update }, status: 'saving' };
   emit();
   if (timer) clearTimeout(timer);
