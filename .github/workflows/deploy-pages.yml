@@ -38,6 +38,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Check frontend
+        working-directory: frontend
+        run: |
+          npm run lint
+          npm test
+
       - name: Build static site
         working-directory: frontend
         env:
