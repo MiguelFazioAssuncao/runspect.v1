@@ -14,7 +14,7 @@ import { createServer } from 'vite';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = fileURLToPath(new URL('../', import.meta.url));
 const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
-const output = process.env.EVOLUTION_OUTPUT || fileURLToPath(new URL('../../docs/evidencias/', import.meta.url));
+const output = process.env.EVOLUTION_OUTPUT || join(tmpdir(), 'runspect-evidencias');
 const temporary = await mkdtemp(join(tmpdir(), 'runspect-evolution-browser-'));
 const entry = 'virtual:evolution-browser.tsx';
 const fixture = await readFile(join(backend, 'internal/runner/testdata/kuhn_difference.cpp'), 'utf8');
