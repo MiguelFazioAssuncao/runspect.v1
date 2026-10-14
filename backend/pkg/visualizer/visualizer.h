@@ -6,11 +6,70 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#ifdef RUNSPECT_TRACE_FD
+#include <cerrno>
+#include <streambuf>
+#include <string_view>
+#include <unistd.h>
+#endif
 
 namespace viz {
 
+#ifdef RUNSPECT_TRACE_FD
+// The runner captures events separately so stdout keeps its original bytes.
+class EventBuffer : public std::streambuf {
+    std::string pending;
+    bool write_all(const char* data, std::streamsize count) {
+        std::streamsize written = 0;
+        while (written < count) {
+            auto n = ::write(RUNSPECT_TRACE_FD, data + written, static_cast<size_t>(count - written));
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) return false;
+            written += n;
+        }
+        return true;
+    }
+    std::streamsize xsputn(const char* data, std::streamsize count) override {
+        const auto size = static_cast<size_t>(count);
+        pending.append(data, size);
+        // Search only the new chunk; rescanning a growing event is quadratic.
+        auto end = std::string_view(data, size).find_last_of('\n');
+        if (end != std::string::npos) {
+            const auto complete = pending.size() - size + end + 1;
+            if (!write_all(pending.data(), static_cast<std::streamsize>(complete))) return 0;
+            pending.erase(0, complete);
+        }
+        return count;
+    }
+    int sync() override {
+        if (!write_all(pending.data(), static_cast<std::streamsize>(pending.size()))) return -1;
+        pending.clear();
+        return 0;
+    }
+    int overflow(int ch) override {
+        if (ch == traits_type::eof()) return traits_type::not_eof(ch);
+        char value = static_cast<char>(ch);
+        return xsputn(&value, 1) == 1 ? ch : traits_type::eof();
+    }
+};
+
+inline std::ostream& runner_event_stream() {
+    // atexit callbacks and global destructors may emit after main returns.
+    static auto* stream = [] {
+        auto* result = new std::ostream(new EventBuffer);
+        result->imbue(std::locale::classic());
+        return result;
+    }();
+    return *stream;
+}
+#endif
+
 inline std::ostream*& event_stream_pointer() {
+#ifdef RUNSPECT_TRACE_FD
+    static std::ostream* stream = &runner_event_stream();
+#else
     static std::ostream* stream = &std::cout;
+#endif
     return stream;
 }
 

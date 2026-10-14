@@ -191,7 +191,7 @@ func codeHandler(cppRunner *runner.CppRunner, analyze bool) http.HandlerFunc {
 
 func main() {
 	cppRunner := runner.NewCppRunner(resolveHeaderPath())
-	cppRunner.CompileTimeout = time.Duration(envInt("RUNSPECT_COMPILE_TIMEOUT_SEC", 10)) * time.Second
+	cppRunner.CompileTimeout = time.Duration(envInt("RUNSPECT_COMPILE_TIMEOUT_SEC", int(cppRunner.CompileTimeout.Seconds()))) * time.Second
 	cppRunner.AnalysisTimeout = time.Duration(envInt("RUNSPECT_ANALYSIS_TIMEOUT_SEC", 30)) * time.Second
 	cppRunner.CacheMaxBytes = envCacheLimit("RUNSPECT_BINARY_CACHE_MB", cppRunner.CacheMaxBytes>>20) << 20
 	cppRunner.CacheMaxEntries = envCacheLimit("RUNSPECT_BINARY_CACHE_ENTRIES", cppRunner.CacheMaxEntries)

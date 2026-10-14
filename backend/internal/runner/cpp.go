@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +43,7 @@ type CppRunner struct {
 func NewCppRunner(headerPath string) *CppRunner {
 	return &CppRunner{
 		HeaderPath:              headerPath,
-		CompileTimeout:          10 * time.Second,
+		CompileTimeout:          30 * time.Second,
 		AnalysisTimeout:         30 * time.Second,
 		CacheMaxBytes:           16 << 20,
 		CacheMaxEntries:         64,
@@ -210,7 +209,7 @@ func (r *CppRunner) compile(ctx context.Context, dir string, metrics *domain.Exe
 	metrics.CompileAttempts++
 	defer func() { metrics.CompileMs += elapsedMs(start) }()
 	base := r.baseDir(dir)
-	args := []string{"g++", "-O0", "-pipe", "-std=c++17"}
+	args := []string{"g++", "-O0", "-pipe", "-std=c++17", "-DRUNSPECT_TRACE_FD=3"}
 	if r.CompilerCachePath != "" {
 		args = append(args, "-I", r.CompilerCachePath)
 	}
@@ -272,7 +271,7 @@ func describeExit(err error, stderr string) string {
 	return fmt.Sprintf("Erro em tempo de execução: %s\n%s", reason, message)
 }
 
-func (r *CppRunner) execute(parent context.Context, dir, stdin string, automatic bool, metrics *domain.ExecutionMetrics, options domain.TraceOptions) domain.ExecutionResult {
+func (r *CppRunner) execute(parent context.Context, dir, stdin string, metrics *domain.ExecutionMetrics, options domain.TraceOptions) domain.ExecutionResult {
 	start := time.Now()
 	defer func() { metrics.ExecuteMs += elapsedMs(start) }()
 	ctx, cancel := context.WithTimeout(parent, r.RunTimeout)
@@ -290,31 +289,19 @@ func (r *CppRunner) execute(parent context.Context, dir, stdin string, automatic
 	stderr := &limitedBuffer{max: r.MaxStderrBytes}
 	cmd.Stderr = stderr
 
-	var stdout io.ReadCloser
-	var err error
-	var traceWriter *os.File
-	var programOutput *limitedBuffer
-	if automatic {
-		stdout, traceWriter, err = os.Pipe()
-		if err == nil {
-			defer stdout.Close()
-			defer traceWriter.Close()
-			cmd.ExtraFiles = []*os.File{traceWriter}
-			programOutput = &limitedBuffer{max: r.MaxOutputBytes}
-			cmd.Stdout = programOutput
-		}
-	} else {
-		stdout, err = cmd.StdoutPipe()
-	}
+	stdout, traceWriter, err := os.Pipe()
 	if err != nil {
 		return fail("Erro ao capturar saída")
 	}
+	defer stdout.Close()
+	defer traceWriter.Close()
+	cmd.ExtraFiles = []*os.File{traceWriter}
+	programOutput := &limitedBuffer{max: r.MaxOutputBytes}
+	cmd.Stdout = programOutput
 	if err := cmd.Start(); err != nil {
 		return fail("Erro ao executar binário")
 	}
-	if traceWriter != nil {
-		_ = traceWriter.Close()
-	}
+	_ = traceWriter.Close()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), r.MaxLineBytes)
@@ -535,7 +522,7 @@ func (r *CppRunner) RunWithContext(ctx context.Context, code, stdin string, opti
 			return fail("Falha ao preparar binário em cache")
 		}
 		stage = "execute"
-		result := r.execute(ctx, tmpDir, stdin, cached.trace.Mode != "manual", metrics, options)
+		result := r.execute(ctx, tmpDir, stdin, metrics, options)
 		return finishExecution(result, cached.trace)
 	}
 	analysisStart := time.Now()
@@ -589,6 +576,6 @@ func (r *CppRunner) RunWithContext(ctx context.Context, code, stdin string, opti
 		}
 	}
 	stage = "execute"
-	result = r.execute(ctx, tmpDir, stdin, trace.Mode != "manual", metrics, options)
+	result = r.execute(ctx, tmpDir, stdin, metrics, options)
 	return finishExecution(result, trace)
 }
