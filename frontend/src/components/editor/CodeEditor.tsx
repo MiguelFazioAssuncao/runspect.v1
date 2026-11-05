@@ -94,18 +94,22 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   }, [logs.length, output]);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full w-full bg-slate-900 border border-slate-800 rounded-xl overflow-auto shadow-lg">
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-950 border-b border-slate-800">
-        <span className="text-xs font-mono font-semibold text-slate-400">solution.cpp</span>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setShowSettings(true)} title="Personalizar editor" aria-label="Personalizar editor" aria-haspopup="dialog" className="editor-settings-trigger"><Settings2 size={15} /></button>
+    <div className="code-workbench">
+      <div className="code-workbench-bar">
+        <div className="code-workbench-file">
+          <span className="code-file-indicator" aria-hidden="true" />
+          <span className="code-file-name">solution.cpp</span>
+          <span className="code-file-badge">C++17</span>
+        </div>
+        <div className="code-workbench-actions">
+          <button type="button" onClick={() => setShowSettings(true)} title="Personalizar editor" aria-label="Personalizar editor" aria-haspopup="dialog" className="editor-settings-trigger"><Settings2 size={14} /></button>
           {isLoading && onCancel && <button type="button" onClick={onCancel} className="cancel-run">Cancelar execução</button>}
           <button
             type="button"
             onClick={onRun}
             disabled={isLoading || disabled}
             title="Executar algoritmo (Ctrl+Enter ou ⌘+Enter)"
-            className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors disabled:opacity-50"
+            className="run-algorithm-btn"
           >
             {isLoading ? 'Executando...' : 'Executar Algoritmo'}
           </button>
@@ -127,8 +131,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         <ResizablePanel title="Terminal" className="terminal-workspace" minHeight={40}>
         <section className={`terminal-panel ${hasError ? 'terminal-panel-error' : ''}`} aria-label="Saída do terminal">
           <div className="terminal-header">
-            <div className="traffic-lights" aria-hidden="true"><i /><i /><i /></div>
-            <span>terminal</span>
+            <span>stdout / stderr</span>
             <span className="terminal-status">{hasError ? 'erro' : 'saída'}</span>
           </div>
           <pre ref={outputRef} className="terminal-output">

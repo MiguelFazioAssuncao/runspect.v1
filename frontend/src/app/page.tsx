@@ -584,27 +584,28 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="flex items-center gap-3">
+        <div className="topbar-brand">
           <div className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64" fill="none" className="h-5 w-5">
-              <path d="M21 47V17h13a10 10 0 0 1 0 20H21m13 0 11 10" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6" />
-              <circle cx="21" cy="17" r="3" fill="#22d3ee" />
-              <circle cx="45" cy="47" r="3" fill="#60a5fa" />
+            <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
+              <path d="M6 8l4 4-4 4M12 16h6" stroke="currentColor" strokeLinecap="square" strokeWidth="2.2" />
             </svg>
           </div>
-          <div><p className="brand-name">RUNSPECT</p><p className="brand-subtitle">algorithms lab</p></div>
+          <span className="brand-name">runspect</span>
+          <span className="topbar-sep" aria-hidden="true">/</span>
+          <span className="topbar-tag">c++17 debugger &amp; trace</span>
         </div>
         <div className="topbar-context">
-          <span className={`status-dot status-dot-${backendStatus}`} />
-          backend {backendStatus === 'connected' ? 'conectado' : backendStatus === 'checking' ? 'verificando...' : 'desconectado'}
-          <span className="text-slate-700">•</span> C++17
+          <span className="run-state">
+            <Activity className="h-3 w-3" />
+            {isLoading ? 'executando' : 'pronto'}
+          </span>
+          <span className="topbar-divider" aria-hidden="true" />
+          <span className="backend-indicator">
+            <span className={`status-dot status-dot-${backendStatus}`} />
+            executor {backendStatus === 'connected' ? 'online' : backendStatus === 'checking' ? 'verificando' : 'offline'}
+          </span>
         </div>
       </header>
-
-      <section className="workspace-heading">
-        <div><p className="section-kicker">Laboratório de programação competitiva</p><h1>Entenda cada passo do algoritmo.</h1></div>
-        <div className="run-state"><Activity className="h-3.5 w-3.5" /> {isLoading ? 'executando' : 'pronto para executar'}</div>
-      </section>
 
       <WorkspaceSplit>
         <div className="editor-column">
@@ -676,7 +677,7 @@ export default function Home() {
           })()}
           {editorTab === 'custom' && (
             <div className="editor-actions">
-              <span className="text-xs text-slate-400">Cole C++17 comum para visualizar a execução.</span>
+              <span className="editor-actions-hint">Cole C++17 comum para visualizar a execução.</span>
               <button
                 className="convert-button"
                 onClick={() => {
@@ -748,7 +749,7 @@ export default function Home() {
             <button type="button" className="visualization-selection-trigger" aria-label="Alterar visualizações" aria-haspopup="dialog" disabled={isRecording || isLoading} onClick={() => setVisualizationPicker({ source: code, input: stdin, execute: false, available: steps.length ? traceVisualizationKeys(steps, untracedOutput) : undefined })}>
               <SlidersHorizontal size={14} /><span>{visualizationSelectionLabel(visualizationSelection)}</span><small>alterar</small>
             </button>
-            {traceMode === 'automatic' && <span className="text-xs text-slate-400">automática</span>}
+            {traceMode === 'automatic' && <span className="trace-mode-badge">automática</span>}
             <GraphToolbar
               layout={layout}
               onLayoutChange={setLayout}
