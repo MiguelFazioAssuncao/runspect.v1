@@ -76,3 +76,36 @@ func TestMaxInFlight(t *testing.T) {
 	close(release)
 	<-done
 }
+
+func TestRateLimitBehindProxyUsesForwardedClient(t *testing.T) {
+	h := Chain(ok, RateLimitBy(60, 1, ClientIP(true)))
+	request := func(forwarded string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/run", nil)
+		req.RemoteAddr = "10.0.0.1:1234" // the proxy, same for everyone
+		req.Header.Set("X-Forwarded-For", forwarded)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := request("203.0.113.7, 10.0.0.1"); code != http.StatusOK {
+		t.Fatalf("primeiro cliente: código %d", code)
+	}
+	if code := request("198.51.100.2"); code != http.StatusOK {
+		t.Fatalf("outro cliente não deveria dividir o limite: código %d", code)
+	}
+	if code := request("203.0.113.7"); code != http.StatusTooManyRequests {
+		t.Fatalf("mesmo cliente deveria ser limitado: código %d", code)
+	}
+}
+
+func TestClientIPIgnoresForwardedHeaderUnlessTrusted(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/run", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.7")
+	if got := ClientIP(false)(req); got != "10.0.0.1" {
+		t.Fatalf("sem proxy confiável: %q", got)
+	}
+	if got := ClientIP(true)(req); got != "203.0.113.7" {
+		t.Fatalf("com proxy confiável: %q", got)
+	}
+}

@@ -48,6 +48,11 @@ func envInt(key string, fallback int) int {
 	return fallback
 }
 
+func envBool(key string) bool {
+	value, err := strconv.ParseBool(os.Getenv(key))
+	return err == nil && value
+}
+
 func envCacheLimit(key string, fallback int) int {
 	if value := os.Getenv(key); value != "" {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
@@ -219,12 +224,14 @@ func main() {
 	)
 	maxInFlight := envInt("RUNSPECT_MAX_CONCURRENT", max(1, runtime.NumCPU()/2))
 	ratePerMinute := envInt("RUNSPECT_RATE_PER_MIN", 60)
+	trustProxy := envBool("RUNSPECT_TRUST_PROXY")
 
 	root := handler.Chain(
 		mux,
 		handler.CORS(origins),
-		handler.RateLimit(ratePerMinute, 10),
+		handler.RateLimitBy(ratePerMinute, 10, handler.ClientIP(trustProxy)),
 		handler.MaxInFlight(maxInFlight),
+		handler.Gzip,
 	)
 
 	server := &http.Server{

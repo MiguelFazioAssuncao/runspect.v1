@@ -40,7 +40,7 @@ func CORS(allowed []string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Vary", "Origin")
+			w.Header().Add("Vary", "Origin")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 
 			origin := r.Header.Get("Origin")
@@ -68,7 +68,34 @@ type bucket struct {
 	last   time.Time
 }
 
+// ClientIP returns the function used to identify a client for rate limiting.
+// Behind a reverse proxy (Render, Fly, nginx...) every request arrives from the
+// proxy address, so all visitors would share a single bucket. With trustProxy
+// the first address of X-Forwarded-For is used instead. Only enable it when the
+// server is not reachable directly, otherwise the header can be forged.
+func ClientIP(trustProxy bool) func(*http.Request) string {
+	return func(r *http.Request) string {
+		if trustProxy {
+			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+				first, _, _ := strings.Cut(forwarded, ",")
+				if ip := strings.TrimSpace(first); ip != "" {
+					return ip
+				}
+			}
+		}
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			return r.RemoteAddr
+		}
+		return host
+	}
+}
+
 func RateLimit(perMinute, burst int) func(http.Handler) http.Handler {
+	return RateLimitBy(perMinute, burst, ClientIP(false))
+}
+
+func RateLimitBy(perMinute, burst int, clientKey func(*http.Request) string) func(http.Handler) http.Handler {
 	rate := float64(perMinute) / 60
 	capacity := float64(burst)
 
@@ -105,11 +132,7 @@ func RateLimit(perMinute, burst int) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				key = r.RemoteAddr
-			}
-			ok, wait := allow(key, time.Now())
+			ok, wait := allow(clientKey(r), time.Now())
 			if !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 				WriteError(w, http.StatusTooManyRequests, "Muitas execuções seguidas, aguarde um instante")

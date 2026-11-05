@@ -1,2 +1,9 @@
 .runtime
 **/__pycache__
+**/*_test.go
+internal/runner/testdata/*
+!internal/runner/testdata/deploy_bubble_sort.cpp
+!internal/runner/testdata/kmp.cpp
+Dockerfile
+.dockerignore
+*.md

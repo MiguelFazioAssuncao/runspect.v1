@@ -1,0 +1,24 @@
+# Render Blueprint for the backend.
+# The frontend lives on GitHub Pages (see .github/workflows/deploy-pages.yml).
+services:
+  - type: web
+    name: runspect-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    # Frontend-only commits (the majority) should not rebuild the backend.
+    buildFilter:
+      paths:
+        - backend/**
+      ignoredPaths:
+        - backend/**/*_test.go
+        - backend/**/testdata/**
+        - backend/**/*.md
+    envVars:
+      - key: RUNSPECT_ALLOWED_ORIGINS
+        value: https://miguelfazioassuncao.github.io
+      - key: RUNSPECT_TRUST_PROXY
+        value: "true"
