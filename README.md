@@ -1,68 +1,55 @@
 # Runspect
 
-Um laboratório para estudar programação competitiva vendo o código C++ rodar, passo a passo.
+Runspect runs C++17 competitive programming solutions and records each step so you can inspect vectors, graphs, matrices, recursion trees, struct instances, and standard output on a timeline.
 
-Comecei o Runspect porque, estudando algoritmos, eu perdia muito tempo enchendo o código de `cout` só para entender o que estava acontecendo com um vetor ou com uma BFS. A ideia aqui é o contrário: você escreve (ou escolhe) um programa C++17, executa, e acompanha a linha atual, os vetores, grafos, matrizes, a pilha de chamadas e a saída, tudo numa linha do tempo que dá para avançar e voltar.
+I built this because debugging graph traversals and dynamic programming tables with `cout` gets tedious fast. Instead of reading raw text dumps, you run the code and step forward or backward through the recorded state transitions.
 
-🔗 **Demo:** https://miguelfazioassuncao.github.io/runspect.v1/
+Live instance: https://miguelfazioassuncao.github.io/runspect.v1/
 
-> O backend fica num plano gratuito do Render. Se for a primeira execução depois de um tempo parado, ele pode levar alguns segundos para acordar.
+The public backend runs on a free Render container. If it has been idle, the first request takes a few extra seconds while the container starts.
 
-## Como eu uso para estudar
+## Repository layout
 
-1. Na aba **técnicas** escolho um dos 35 exemplos (a busca ignora acentos, então "arvore" acha "árvore").
-2. Leio o **Como estudar esta técnica**: quando usar, o que observar, os erros mais comuns e um experimento para fazer.
-3. Clico em **Executar Algoritmo** (ou `Ctrl+Enter` / `⌘+Enter` no editor), escolho os painéis e vou avançando na linha do tempo.
-4. Comparo a saída com a referência. Atenção: isso vale só para a entrada de exemplo e não prova que a solução está certa. Tem problema que aceita mais de uma resposta.
-5. Marco o que já consigo explicar sem olhar e sigo uma das cinco **trilhas de estudo**.
+- [`frontend/`](./frontend/README.md): Next.js 16 interface, Monaco editor, trace reducers, D3 graph canvas, and study catalog.
+- [`backend/`](./backend/README.md): Go HTTP server, libclang AST instrumenter (`instrument_cpp.py`), C++17 trace headers (`visualizer.h`, `automatic.h`), and `bubblewrap` execution sandbox.
+- [`render.yaml`](./render.yaml): Render blueprint for the Dockerized backend.
+- [`.github/workflows/`](./.github/workflows): CI for the Go backend and static deployment to GitHub Pages.
 
-As abas **seu código** e **técnicas** também funcionam com as setas do teclado, `Home` e `End`.
+## How it works
 
-### Onde ficam os dados
+When you click **Executar Algoritmo** (or press `Ctrl+Enter` / `Cmd+Enter`), the frontend sends the C++17 source and `stdin` to the Go backend:
 
-Não tem conta nem nuvem. Código, entrada, rascunhos de cada técnica e progresso ficam no `localStorage` do navegador, salvos 400 ms depois da última edição (e também ao fechar a página).
+1. A Python script using `libclang` parses the translation unit to identify local containers, graph adjacency lists, DP tables, and loop variables.
+2. The instrumenter rewrites the source to emit trace events through `visualizer.h` and `automatic.h` without changing standard output. If a construct cannot be instrumented automatically, the backend falls back to plain execution or explicit `viz::` calls.
+3. `g++` compiles the instrumented source against a precompiled `bits/stdc++.h` header. Compiled binaries and analysis results are cached in memory (LRU).
+4. The binary runs inside an unprivileged `bubblewrap` namespace with `prlimit` caps (3 seconds of wall time, 512 MiB of address space, 64 KiB of `stdin`, no network).
+5. The server streams the gzip-compressed JSON trace back to the browser, which reconstructs the state at each step.
 
-- **Restaurar exemplo** apaga só o rascunho da técnica aberta.
-- **Baixar projeto** gera um arquivo com o código, a entrada, os rascunhos e o progresso. **Abrir projeto** restaura esse arquivo (projetos antigos continuam funcionando).
-- O arquivo tem limite de 512 KiB. Se algo passar do limite, o site avisa e mantém a última versão válida.
-- Abas diferentes não se sincronizam: quem salvar por último ganha.
+## Running locally
 
-## Como funciona
+You need Linux (or WSL2 on Windows) for the backend because `bubblewrap` relies on Linux user namespaces.
 
-```
-frontend/  Next.js + React, Monaco, D3   → interface, editor e visualizações
-backend/   Go                            → analisa, instrumenta, compila e executa o C++
-```
+Dependencies:
+- Node.js 22+ and npm
+- Go 1.24+
+- `g++` with C++17 support
+- `python3` and `python3-clang`
+- `bubblewrap` and `util-linux` (`prlimit`)
 
-O backend recebe o código, usa o Clang (via `python3-clang`) para descobrir o que vale a pena rastrear, injeta as chamadas do `visualizer.h`, compila com `g++` e roda o binário isolado com `bubblewrap` + `prlimit`. Os eventos voltam como JSON e o frontend transforma isso em quadros.
-
-Alguns detalhes que deram trabalho e valem saber:
-
-- **Headers pré-compilados.** O `bits/stdc++.h` é pré-compilado na imagem Docker (`prepare_cpp_cache.py`). Sem isso, cada compilação no Render demorava bem mais.
-- **Cache.** Binários e análises são guardados em memória (LRU), então rodar o mesmo código de novo é quase instantâneo.
-- **Limites.** 30 s por tentativa de compilação, 3 s de execução, 512 MiB de memória, 64 KiB de stdin. Se der erro no meio, a saída parcial e os passos já capturados continuam visíveis.
-- **Respostas comprimidas.** Traços grandes vão com gzip, o que faz muita diferença na conexão até o Render.
-- **Nem todo C++ vira desenho.** A instrumentação automática cobre bastante coisa, mas não tudo; quando não dá, o terminal explica o motivo.
-
-## Rodando localmente
-
-Vai precisar de: Node.js 22+, Go 1.24+, `g++` com C++17, Python 3 com `python3-clang`, `bubblewrap` e `util-linux`.
-
-O executor depende de namespaces do Linux. No Windows use WSL2; no macOS rode o backend numa VM Linux. O frontend roda em qualquer lugar.
+On Debian or Ubuntu:
 
 ```sh
-# Debian/Ubuntu
 sudo apt install g++ python3-clang bubblewrap util-linux
 ```
 
-Backend:
+Start the backend on `127.0.0.1:8080`:
 
 ```sh
 cd backend
 go run ./cmd/server
 ```
 
-Frontend, em outro terminal:
+In a second terminal, install frontend dependencies and start the dev server on `http://localhost:3000`:
 
 ```sh
 cd frontend
@@ -70,73 +57,68 @@ npm ci
 npm run dev
 ```
 
-Abra http://localhost:3000. O Next repassa `/api/*` e `/healthz` para `http://127.0.0.1:8080`, então não precisa configurar nada.
+You can also run `npm run dev`, `npm test`, `npm run lint`, and `npm run build` directly from the repository root.
 
-> Se o seu sistema não deixa o bubblewrap criar namespaces, dá para usar `RUNSPECT_SANDBOX=off` **só** para desenvolvimento, com código em que você confia.
+In development mode, Next.js proxies `/api/*` and `/healthz` to `http://127.0.0.1:8080`. If your kernel blocks unprivileged user namespaces, you can start the backend with `RUNSPECT_SANDBOX=off` for local testing with trusted code only.
 
-O Monaco é servido localmente: o `predev`/`prebuild` copia só o necessário para editar C++ em `public/monaco` (sem os workers de TypeScript, CSS, HTML e JSON, que o projeto não usa). Não edite essa pasta. Se o editor não carregar, o botão **Usar editor simples** troca por um `textarea`.
+## Workspace and study mode
 
-## Deploy
+The interface is in Portuguese and has two main tabs:
 
-| Parte | Onde | Como |
+- **seu código**: scratchpad for your own C++17 programs.
+- **técnicas**: 35 reference implementations grouped into five study tracks (fundamentals, sorting/searching, graphs, dynamic programming, and advanced structures). Each technique includes a short study guide covering when to apply it, what to watch in the trace, common off-by-one or overflow bugs, and a small modification to try.
+
+Drafts, custom `stdin`, and completed techniques are saved to `localStorage` 400 ms after you stop typing. You can export the entire workspace to a JSON file (up to 512 KiB) and load it back later.
+
+## Configuration
+
+| Variable | Description | Default |
 | --- | --- | --- |
-| Frontend | GitHub Pages | `.github/workflows/deploy-pages.yml`, a cada push na `main` ou `v1` que mexa em `frontend/` |
-| Backend | Render (Docker) | `render.yaml` + `backend/Dockerfile`, só rebuilda quando `backend/` muda |
+| `RUNSPECT_API_URL` | Backend target for the Next.js dev proxy | `http://127.0.0.1:8080` |
+| `NEXT_PUBLIC_RUNSPECT_API_URL` | Public backend URL baked into the static export | empty (same origin) |
+| `NEXT_PUBLIC_BASE_PATH` | URL path prefix for static hosting (e.g. `/runspect.v1`) | empty |
+| `GITHUB_PAGES` | Set to `true` to export static HTML to `frontend/out` | unset |
+| `RUNSPECT_ADDR` | Backend listen address | `127.0.0.1:8080` |
+| `PORT` | Listen port when `RUNSPECT_ADDR` is not set | unset |
+| `RUNSPECT_ALLOWED_ORIGINS` | Comma-separated list of allowed CORS origins | `http://localhost:3000,http://127.0.0.1:3000` |
+| `RUNSPECT_TRUST_PROXY` | Set to `true` behind a reverse proxy to rate-limit by `X-Forwarded-For` | `false` |
+| `RUNSPECT_RATE_PER_MIN` | Max execution requests per minute per client IP | `60` |
+| `RUNSPECT_MAX_CONCURRENT` | Max parallel compilations/executions | half of available CPUs (min 1) |
+| `RUNSPECT_COMPILE_TIMEOUT_SEC` | Timeout per `g++` invocation in seconds | `30` |
+| `RUNSPECT_ANALYSIS_TIMEOUT_SEC` | Timeout for the Clang analysis pass in seconds | `30` |
+| `RUNSPECT_SANDBOX` | Set to `off` to skip `bubblewrap` (local development only) | enabled |
 
-O que deixei mais rápido no deploy:
+## Testing
 
-- **Pages:** lint e testes rodam em paralelo com o build, o cache do `.next` é reaproveitado entre execuções, e o Monaco enviado caiu de ~25 MB para ~6 MB.
-- **Docker:** a imagem não leva mais o binário de benchmark nem os scripts de build; o Go compila com cache do BuildKit e `-trimpath -ldflags="-s -w"`; as camadas mais pesadas (apt e PCH) ficam no topo para o cache pegar.
-- **Render:** `buildFilter` evita rebuild do backend quando só o frontend muda, e o `healthCheckPath` faz o deploy só trocar de versão quando o servidor novo já responde.
-
-Para publicar num fork, crie a variável de repositório `RUNSPECT_API_URL` com a URL pública do backend e ajuste `RUNSPECT_ALLOWED_ORIGINS` no `render.yaml`.
-
-### Variáveis de ambiente
-
-| Variável | Para quê | Padrão |
-| --- | --- | --- |
-| `RUNSPECT_API_URL` | Destino do proxy do Next (definir antes do build) | `http://127.0.0.1:8080` |
-| `NEXT_PUBLIC_RUNSPECT_API_URL` | URL pública do backend no site estático | vazio (mesma origem) |
-| `NEXT_PUBLIC_BASE_PATH` | Subdiretório, ex.: `/runspect` | vazio |
-| `GITHUB_PAGES` | `true` gera o site estático em `frontend/out` | desligado |
-| `RUNSPECT_ADDR` | Endereço do backend | `127.0.0.1:8080` |
-| `PORT` | Porta, se `RUNSPECT_ADDR` não estiver definido | — |
-| `RUNSPECT_ALLOWED_ORIGINS` | Origens CORS, separadas por vírgula | localhost:3000 |
-| `RUNSPECT_TRUST_PROXY` | `true` usa o `X-Forwarded-For` no rate limit (atrás de proxy, como no Render) | desligado |
-| `RUNSPECT_RATE_PER_MIN` | Execuções por minuto por IP | 60 |
-| `RUNSPECT_MAX_CONCURRENT` | Execuções simultâneas | metade das CPUs |
-| `RUNSPECT_COMPILE_TIMEOUT_SEC` | Tempo por tentativa de compilação | 30 |
-| `RUNSPECT_ANALYSIS_TIMEOUT_SEC` | Tempo da análise com Clang | 30 |
-| `RUNSPECT_SANDBOX` | `off` desliga o isolamento (só em dev!) | ligado |
-
-## Testes
+Frontend lint, type-check, and unit tests:
 
 ```sh
 cd frontend
-npm run lint && npx tsc --noEmit && npm test && npm run build
+npm run lint
+npx tsc --noEmit
+npm test
 ```
+
+Backend unit and integration tests:
 
 ```sh
 cd backend
 go test ./...
 ```
 
-Outros que uso de vez em quando:
+To run the full C++ catalog against the real compiler and instrumenter:
 
-- `npm run test:cpp` testa os exemplos com o compilador de verdade (`RUNSPECT_TEST_AUTOMATIC=1` inclui a instrumentação automática).
-- `npm run test:study` sobe servidores temporários e testa a interface inteira no Chromium: editor, rascunhos, trilhas, busca, execução, importação/exportação e layout mobile. Precisa do `playwright` (ou `PLAYWRIGHT_MODULE`) e do Chromium (`CHROMIUM`, padrão `/usr/bin/chromium`).
-- `npm run test:proxy` confere que o proxy do Next aguenta respostas que levam mais de 30 s.
+```sh
+cd frontend
+RUNSPECT_TEST_AUTOMATIC=1 npm run test:cpp
+```
 
-Os testes Go do sandbox precisam de um ambiente onde o bubblewrap consiga criar namespaces.
+## Deployment
 
-## O que ainda quero fazer
+The frontend deploys to GitHub Pages through `.github/workflows/deploy-pages.yml` whenever files under `frontend/` change on `main` or `v1`. The workflow caches `.next/cache`, strips unused Monaco language workers (TypeScript, CSS, HTML, JSON) during `prebuild`, and publishes `frontend/out`. To point a fork at your own backend, set the `RUNSPECT_API_URL` repository variable in GitHub Actions settings.
 
-- Exercícios com vários casos de teste e validadores para problemas com mais de uma resposta.
-- Breakpoints e "watch" de expressões escolhidas por quem está estudando.
-- Traços pré-calculados para os exemplos, para dar para explorar sem esperar compilação.
-- Mover a análise de grafos grandes para um Web Worker.
-- Outras linguagens além de C++17 (cada uma precisa do seu próprio instrumentador).
+The backend deploys to Render as a Docker service defined in `render.yaml` and `backend/Dockerfile`. The Dockerfile precompiles `bits/stdc++.h` at image build time so cold compilations on Render do not parse the standard library headers from scratch on every request.
 
----
+## Author
 
-Feito por [Miguel Fazio](https://github.com/MiguelFazioAssuncao).
+[Miguel Fazio](https://github.com/MiguelFazioAssuncao)

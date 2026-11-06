@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1.7
 
-# ---- build: compiles the Go binaries --------------------------------------
 FROM golang:1.24-bookworm AS build
 WORKDIR /src
 
@@ -13,9 +12,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags="-s -w" -o /out/runspect ./cmd/server
 
-# ---- runtime base: toolchain + precompiled headers ------------------------
-# These layers are the slow ones (apt + PCH), so they only depend on files that
-# almost never change and stay cached between deploys.
+# Toolchain and precompiled headers stay in an early stage so code changes do
+# not invalidate the slow apt and g++ PCH layers.
 FROM debian:bookworm-slim AS runtime-base
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -29,7 +27,6 @@ COPY pkg/visualizer/instrument_cpp.py pkg/visualizer/prepare_cpp_cache.py /tmp/c
 RUN python3 -B /tmp/compiler-tools/prepare_cpp_cache.py /app/.compiler-cache \
     && rm -rf /tmp/compiler-tools
 
-# Only what the server reads at runtime.
 COPY pkg/visualizer/visualizer.h pkg/visualizer/automatic.h pkg/visualizer/instrument_cpp.py /app/pkg/visualizer/
 
 ENV RUNSPECT_ADDR=0.0.0.0:8080 \
@@ -45,7 +42,6 @@ ENV RUNSPECT_ADDR=0.0.0.0:8080 \
     RUNSPECT_ANALYSIS_CACHE_ENTRIES=64
 EXPOSE 8080
 
-# ---- benchmark (optional): docker build --target benchmark ----------------
 FROM build AS benchmark-build
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
@@ -57,7 +53,6 @@ COPY --from=benchmark-build /out/runspect-benchmark /app/runspect-benchmark
 COPY --from=build /out/runspect /app/runspect
 CMD ["/app/runspect-benchmark"]
 
-# ---- final image (default target) ------------------------------------------
 FROM runtime-base AS runtime
 COPY --from=build /out/runspect /app/runspect
 CMD ["/app/runspect"]

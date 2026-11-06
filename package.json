@@ -2,13 +2,14 @@
   "name": "runspect",
   "version": "1.0.0",
   "private": true,
-  "description": "Visualizador determinístico de algoritmos em C++17",
+  "description": "Step-by-step C++17 execution visualizer for competitive programming",
   "scripts": {
     "postinstall": "npm --prefix frontend install",
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix frontend run start",
     "lint": "npm --prefix frontend run lint",
-    "test": "npm --prefix frontend test"
+    "test": "npm --prefix frontend test",
+    "test:backend": "cd backend && go test ./..."
   }
 }

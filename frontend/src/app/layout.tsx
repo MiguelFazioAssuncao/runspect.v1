@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Runspect — Algorithms Lab",
+  title: "Runspect - Algorithms Lab",
   description: "Aprenda programação competitiva com C++17, guias de estudo e visualizações passo a passo de algoritmos e estruturas de dados.",
 };
 
