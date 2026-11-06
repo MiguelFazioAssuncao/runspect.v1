@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Activity, CircleHelp, Clock3, Network, SlidersHorizontal } from 'lucide-react';
+import { CircleHelp, Clock3, Network, SlidersHorizontal } from 'lucide-react';
 import { LearningPanel } from '@/components/LearningPanel';
 import { StudyPaths } from '@/components/StudyPaths';
 import type { SampleRun } from '@/components/LearningPanel';
 import { useStudyProject } from '@/hooks/useStudyProject';
+import { CATEGORY_EN, EXAMPLE_EN, localizedVisualizationSelectionLabel, useLocale } from '@/lib/i18n';
 import { MAX_PROJECT_BYTES, normalizeSearch, parseStudyProject, serializeStudyProject, validateProgram } from '@/lib/studyProject';
 import type { ProgramDraft } from '@/lib/studyProject';
 import { WorkspaceSplit } from '@/components/workspace/WorkspaceSplit';
@@ -27,7 +28,7 @@ import { ProgramConsole } from '@/components/visualizer/ProgramConsole';
 import { VectorSortPanel } from '@/components/visualizer/VectorSortPanel';
 import { GraphAnalysisPanel } from '@/components/visualizer/GraphAnalysisPanel';
 import { VisualizationPicker } from '@/components/visualizer/VisualizationPicker';
-import { DEFAULT_VISUALIZATION_SELECTION, selectVisualizationContent, traceVisualizationKeys, visualizationSelectionLabel } from '@/lib/visualizationSelection';
+import { DEFAULT_VISUALIZATION_SELECTION, selectVisualizationContent, traceVisualizationKeys } from '@/lib/visualizationSelection';
 import type { VisualizationKey, VisualizationSelection } from '@/lib/visualizationSelection';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { useVisualizerPlayer } from '@/hooks/useVisualizerPlayer';
@@ -68,7 +69,9 @@ type ExampleItem = (typeof examples)[number];
 const filterExamples = (query: string, category: string): ExampleItem[] => {
   const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
   return examples.filter((example) => {
-    const searchable = normalizeSearch(`${example.name} ${example.description} ${example.tags.join(' ')}`);
+    const en = EXAMPLE_EN[example.id];
+    const catEn = CATEGORY_EN[example.category ?? 'Outros'] ?? '';
+    const searchable = normalizeSearch(`${example.name} ${example.description} ${en?.name ?? ''} ${en?.description ?? ''} ${catEn} ${example.tags.join(' ')}`);
     const matchesQuery = terms.every(term => searchable.includes(term));
     return matchesQuery && (category === 'todas' || (example.category ?? 'Outros') === category);
   });
@@ -86,6 +89,7 @@ interface VisualizationStageProps {
 }
 
 const VisualizationStage = React.memo(function VisualizationStage({ player, layout, runId, hasSteps, selection, fallbackOutput = '', graphRef, staticRender = false }: VisualizationStageProps) {
+  const { tr } = useLocale();
   const analysisKey = JSON.stringify({
     directed: player.directed,
     nodes: player.graphState.nodes.map(node => ({ id: node.id, label: node.label })),
@@ -142,18 +146,18 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
               <Network className="h-8 w-8" />
               {!hasSelection ? (
                 <>
-                  <strong>Somente o terminal está ativo</strong>
-                  <span>Use “Alterar visualizações” para escolher painéis.</span>
+                  <strong>{tr('Somente o terminal está ativo', 'Terminal only')}</strong>
+                  <span>{tr('Use “Alterar visualizações” para escolher painéis.', 'Use "Change panels" to enable visualizers.')}</span>
                 </>
               ) : !hasSteps ? (
                 <>
-                  <strong>Escolha o que acompanhar</strong>
-                  <span>Ao executar, selecione as visualizações desejadas.</span>
+                  <strong>{tr('Escolha o que acompanhar', 'Nothing running yet')}</strong>
+                  <span>{tr('Ao executar, selecione as visualizações desejadas.', 'Run a C++17 program and select the panels to inspect.')}</span>
                 </>
               ) : (
                 <>
-                  <strong>Nenhum dado dos painéis selecionados neste passo</strong>
-                  <span>Avance na linha do tempo ou altere as visualizações.</span>
+                  <strong>{tr('Nenhum dado dos painéis selecionados neste passo', 'No data for the selected panels at this step')}</strong>
+                  <span>{tr('Avance na linha do tempo ou altere as visualizações.', 'Step forward on the timeline or change active panels.')}</span>
                 </>
               )}
             </div>
@@ -170,6 +174,7 @@ const VisualizationStage = React.memo(function VisualizationStage({ player, layo
   (['graphState', 'vectors', 'vectorIssues', 'logs', 'programConsole', 'structs', 'matrices', 'calls', 'references', 'caption', 'directed', 'weighted', 'multi'] as const).every(key => previous.player[key] === next.player[key]));
 
 export default function Home() {
+  const { locale, setLocale, isEn, tr } = useLocale();
   const { project, status: saveStatus, error: saveError, updateProject } = useStudyProject();
   const [selectedExampleId, setSelectedExampleId] = useState(examples[0].id);
   const selectedExample = examples.find(example => example.id === selectedExampleId) ?? examples[0];
@@ -205,7 +210,6 @@ export default function Home() {
   const [visualizationSelection, setVisualizationSelection] = useState(DEFAULT_VISUALIZATION_SELECTION);
   const [visualizationPicker, setVisualizationPicker] = useState<{ source: string; input: string; execute: boolean; available?: VisualizationKey[] } | null>(null);
   const [showDocumentation, setShowDocumentation] = useState(false);
-  const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [fullscreen, setFullscreen] = useState(false);
   const [recordingStage, setRecordingStage] = useState<RecordingStage | null>(null);
   const [svgSnapshot, setSvgSnapshot] = useState<SvgSnapshot | null>(null);
@@ -282,37 +286,10 @@ export default function Home() {
   const hasVisualization = hasContent || (visualizationSelection.output && !!untracedOutput);
 
   const playbackCompleted = player.totalSteps > 0 && player.currentStepIndex === player.totalSteps - 1;
-  const terminalText = isLoading || hasError || steps.length === 0
+  const rawTerminalText = isLoading || hasError || steps.length === 0
     ? output
     : terminalOutput(player.programConsole.output || (playbackCompleted ? untracedOutput : ''), output, playbackCompleted);
-
-  useEffect(() => {
-    let active = true;
-
-    const checkBackend = async () => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 3000);
-
-      try {
-        const response = await fetch(runspectApiUrl('/healthz'), {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        if (active) setBackendStatus(response.ok ? 'connected' : 'disconnected');
-      } catch {
-        if (active) setBackendStatus('disconnected');
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    };
-
-    void checkBackend();
-    const interval = window.setInterval(checkBackend, 15000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, []);
+  const terminalText = isEn && rawTerminalText === 'Aguardando uma execução...' ? 'Waiting for execution...' : rawTerminalText;
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -499,7 +476,6 @@ export default function Home() {
         );
       }
       if (controller.signal.aborted) return;
-      setBackendStatus('connected');
       setTraceMode(result.trace_mode);
       setRunId((id) => id + 1);
       const capturedSteps = result.steps ?? [];
@@ -510,24 +486,23 @@ export default function Home() {
       setUntracedOutput(result.trace_mode === 'manual' ? result.output ?? '' : '');
       if (!response.ok || !result.success) {
         setHasError(true);
-        setOutput(terminalOutput(result.output ?? '', `${result.errors || result.error || `A execução falhou (HTTP ${response.status}).`}${warnings}`, true));
+        setOutput(terminalOutput(result.output ?? '', `${result.errors || result.error || tr(`A execução falhou (HTTP ${response.status}).`, `Execution failed (HTTP ${response.status}).`)}${warnings}`, true));
       } else {
         if (editorTab === 'examples') setSampleRun({ exampleId: selectedExampleId, code: source, stdin: input, output: result.output ?? '' });
-        const status = `Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`;
+        const status = tr(`Concluído em ${result.time_ms} ms (análise, compilação e execução).${warnings}`, `Completed in ${result.time_ms} ms (analysis, compilation, and execution).${warnings}`);
         setOutput(capturedSteps.length ? status : terminalOutput(result.output ?? '', status, true));
       }
     } catch (error) {
       if (controller.signal.aborted) {
         setHasError(timedOut);
-        setOutput(timedOut ? 'O servidor demorou mais que o esperado. Tente novamente com uma entrada menor.' : 'Execução cancelada. Seu código foi preservado.');
+        setOutput(timedOut ? tr('O servidor demorou mais que o esperado. Tente novamente com uma entrada menor.', 'The server took longer than expected. Try again with a smaller input.') : tr('Execução cancelada. Seu código foi preservado.', 'Execution cancelled. Your code was preserved.'));
         return;
       }
       setHasError(true);
       if (error instanceof TypeError) {
-        setBackendStatus('disconnected');
-        setOutput('Não foi possível conectar ao servidor de execução. Seu código está disponível no editor. Verifique sua conexão e tente novamente em alguns instantes.');
+        setOutput(tr('Não foi possível conectar ao servidor de execução. Seu código está disponível no editor. Verifique sua conexão e tente novamente em alguns instantes.', 'Could not connect to the execution server. Your code is still saved in the editor. Check your connection and try again.'));
       } else {
-        setOutput(error instanceof Error ? error.message : 'Não foi possível executar o código.');
+        setOutput(error instanceof Error ? error.message : tr('Não foi possível executar o código.', 'Could not execute the code.'));
       }
     } finally {
       window.clearTimeout(timeout);
@@ -592,25 +567,32 @@ export default function Home() {
           </div>
           <span className="brand-name">runspect</span>
           <span className="topbar-sep" aria-hidden="true">/</span>
-          <span className="topbar-tag">c++17 debugger &amp; trace</span>
+          <span className="topbar-tag">c++17</span>
         </div>
-        <div className="topbar-context">
-          <span className="run-state">
-            <Activity className="h-3 w-3" />
-            {isLoading ? 'executando' : 'pronto'}
-          </span>
-          <span className="topbar-divider" aria-hidden="true" />
-          <span className="backend-indicator">
-            <span className={`status-dot status-dot-${backendStatus}`} />
-            executor {backendStatus === 'connected' ? 'online' : backendStatus === 'checking' ? 'verificando' : 'offline'}
-          </span>
+        <div className="locale-switch" role="group" aria-label={tr('Idioma', 'Language')}>
+          <button
+            type="button"
+            className={`locale-btn ${locale === 'pt' ? 'locale-btn-active' : ''}`}
+            aria-pressed={locale === 'pt'}
+            onClick={() => setLocale('pt')}
+          >
+            PT
+          </button>
+          <button
+            type="button"
+            className={`locale-btn ${locale === 'en' ? 'locale-btn-active' : ''}`}
+            aria-pressed={locale === 'en'}
+            onClick={() => setLocale('en')}
+          >
+            EN
+          </button>
         </div>
       </header>
 
       <WorkspaceSplit>
         <div className="editor-column">
           <div className="editor-header">
-            <div className="editor-tabs" role="tablist" aria-label="Fonte do código" onKeyDown={event => {
+            <div className="editor-tabs" role="tablist" aria-label={tr('Fonte do código', 'Code source')} onKeyDown={event => {
               if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
               event.preventDefault();
               const tab = event.key === 'Home' ? 'custom' : event.key === 'End' ? 'examples' : editorTab === 'custom' ? 'examples' : 'custom';
@@ -626,7 +608,7 @@ export default function Home() {
                 tabIndex={editorTab === 'custom' ? 0 : -1}
                 aria-selected={editorTab === 'custom'}
               >
-                seu código
+                {tr('seu código', 'your code')}
               </button>
               <button
                 className={`editor-tab ${editorTab === 'examples' ? 'editor-tab-active' : ''}`}
@@ -637,14 +619,14 @@ export default function Home() {
                 tabIndex={editorTab === 'examples' ? 0 : -1}
                 aria-selected={editorTab === 'examples'}
               >
-                técnicas
+                {tr('técnicas', 'techniques')}
               </button>
             </div>
             {editorTab === 'examples' && (
               <div className="example-controls">
-                <input className="example-search" value={exampleQuery} onChange={(e) => changeExampleQuery(e.target.value)} placeholder="buscar exemplo..." aria-label="Buscar exemplos" />
-                <select className="example-select" value={exampleCategory} onChange={(e) => changeExampleCategory(e.target.value)} aria-label="Filtrar exemplos por categoria">
-                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                <input className="example-search" value={exampleQuery} onChange={(e) => changeExampleQuery(e.target.value)} placeholder={tr('buscar exemplo...', 'search technique...')} aria-label={tr('Buscar exemplos', 'Search techniques')} />
+                <select className="example-select" value={exampleCategory} onChange={(e) => changeExampleCategory(e.target.value)} aria-label={tr('Filtrar exemplos por categoria', 'Filter techniques by category')}>
+                  {categories.map((category) => <option key={category} value={category}>{isEn ? CATEGORY_EN[category] ?? category : category}</option>)}
                 </select>
                 <select
                   className="example-select"
@@ -653,10 +635,10 @@ export default function Home() {
                     const ex = examples.find((x) => x.id === e.target.value);
                     if (ex) selectExample(ex);
                   }}
-                  aria-label="Selecionar técnica de programação competitiva"
+                  aria-label={tr('Selecionar técnica de programação competitiva', 'Select competitive programming technique')}
                 >
-                  {visibleExamples.length === 0 && <option value="">nenhuma técnica encontrada</option>}
-                  {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{project.completed.includes(ex.id) ? '✓ ' : ''}{ex.name}</option>)}
+                  {visibleExamples.length === 0 && <option value="">{tr('nenhuma técnica encontrada', 'no matching techniques')}</option>}
+                  {visibleExamples.map((ex) => <option key={ex.id} value={ex.id}>{project.completed.includes(ex.id) ? '✓ ' : ''}{isEn ? EXAMPLE_EN[ex.id]?.name ?? ex.name : ex.name}</option>)}
                 </select>
               </div>
             )}
@@ -664,8 +646,8 @@ export default function Home() {
           <div id="source-workspace" role="tabpanel" aria-labelledby={`source-tab-${editorTab}`} className="editor-tab-panel">
           <StudyPaths completed={project.completed} onSelect={openExample} />
           {editorTab === 'examples' && visibleExamples.length === 0 && <div className="example-empty" role="status">
-            <span>Nenhuma técnica corresponde aos filtros.</span>
-            <button type="button" onClick={() => { setExampleQuery(''); setExampleCategory('todas'); }}>Limpar filtros</button>
+            <span>{tr('Nenhuma técnica corresponde aos filtros.', 'No techniques match the active filters.')}</span>
+            <button type="button" onClick={() => { setExampleQuery(''); setExampleCategory('todas'); }}>{tr('Limpar filtros', 'Clear filters')}</button>
           </div>}
           {editorTab === 'examples' && (() => {
             const example = examples.find((item) => item.id === selectedExampleId);
@@ -677,40 +659,40 @@ export default function Home() {
           })()}
           {editorTab === 'custom' && (
             <div className="editor-actions">
-              <span className="editor-actions-hint">Cole C++17 comum para visualizar a execução.</span>
+              <span className="editor-actions-hint">{tr('Cole C++17 comum para visualizar a execução.', 'Paste standard C++17 code to trace execution.')}</span>
               <button
                 className="convert-button"
                 onClick={() => {
                   try {
                     const converted = convertToPureCpp(project.code);
                     downloadFile(new Blob([converted], { type: 'text/x-c++src;charset=utf-8' }), 'solucao.cpp');
-                    setConversionNotice('Arquivo solucao.cpp baixado com C++ puro.');
+                    setConversionNotice(tr('Arquivo solucao.cpp baixado com C++ puro.', 'Downloaded solucao.cpp with plain C++17.'));
                   } catch (error) {
-                    setConversionNotice(error instanceof Error ? error.message : 'Falha na conversão.');
+                    setConversionNotice(error instanceof Error ? error.message : tr('Falha na conversão.', 'Conversion failed.'));
                   }
                   window.setTimeout(() => setConversionNotice(''), 3500);
                 }}
                 type="button"
               >
-                baixar C++ puro
+                {tr('baixar C++ puro', 'download plain C++')}
               </button>
               {conversionNotice && <span className="conversion-notice" role="status">{conversionNotice}</span>}
             </div>
           )}
           <div className="project-actions">
-            <span role="status">{saveStatus === 'saving' ? 'Salvando…' : saveStatus === 'unavailable' ? saveError ? `Não foi possível salvar. ${saveError}` : 'Não foi possível salvar neste navegador. Baixe o projeto para guardar suas alterações.' : saveStatus === 'recovered' ? 'Não foi possível recuperar o rascunho salvo.' : editorTab === 'custom' ? 'Código e entrada salvos neste navegador' : 'Rascunhos das técnicas salvos neste navegador'}</span>
+            <span role="status">{saveStatus === 'saving' ? tr('Salvando…', 'Saving…') : saveStatus === 'unavailable' ? saveError ? `${tr('Não foi possível salvar.', 'Could not save.')} ${saveError}` : tr('Não foi possível salvar neste navegador. Baixe o projeto para guardar suas alterações.', 'Local storage unavailable. Download the project to keep your changes.') : saveStatus === 'recovered' ? tr('Não foi possível recuperar o rascunho salvo.', 'Could not recover saved draft.') : editorTab === 'custom' ? tr('Código e entrada salvos neste navegador', 'Code and input saved in this browser') : tr('Rascunhos das técnicas salvos neste navegador', 'Technique drafts saved in this browser')}</span>
             <button type="button" onClick={() => {
               try {
                 validateProgram(code, stdin);
                 downloadFile(new Blob([serializeStudyProject({ ...project, code, stdin })], { type: 'application/json;charset=utf-8' }), 'runspect-projeto.json');
-                setProjectNotice('Projeto baixado com código, entrada, rascunhos e progresso.');
-              } catch (error) { setProjectNotice(error instanceof Error ? error.message : 'Não foi possível baixar o projeto.'); }
-            }}>Baixar projeto</button>
-            <button type="button" onClick={() => importRef.current?.click()} disabled={isLoading || isRecording}>Abrir projeto</button>
-            <input ref={importRef} type="file" accept=".json,application/json" hidden aria-label="Arquivo de projeto" onChange={event => { void importProject(event.target.files?.[0]); event.target.value = ''; }} />
+                setProjectNotice(tr('Projeto baixado com código, entrada, rascunhos e progresso.', 'Project downloaded with code, input, drafts, and progress.'));
+              } catch (error) { setProjectNotice(error instanceof Error ? error.message : tr('Não foi possível baixar o projeto.', 'Could not download project.')); }
+            }}>{tr('Baixar projeto', 'Download project')}</button>
+            <button type="button" onClick={() => importRef.current?.click()} disabled={isLoading || isRecording}>{tr('Abrir projeto', 'Open project')}</button>
+            <input ref={importRef} type="file" accept=".json,application/json" hidden aria-label={tr('Arquivo de projeto', 'Project file')} onChange={event => { void importProject(event.target.files?.[0]); event.target.value = ''; }} />
             {projectNotice && <p role="status">{projectNotice}</p>}
           </div>
-          {steps.length > 0 && (code !== executedCode || stdin !== executedInput) && <p className="execution-notice" role="status">O código ou a entrada mudou. Execute novamente para atualizar a visualização.</p>}
+          {steps.length > 0 && (code !== executedCode || stdin !== executedInput) && <p className="execution-notice" role="status">{tr('O código ou a entrada mudou. Execute novamente para atualizar a visualização.', 'Code or input changed. Run again to refresh the trace.')}</p>}
           <div className="code-editor-wrap">
             <CodeEditor
               code={code}
@@ -731,12 +713,12 @@ export default function Home() {
               value={stdin}
               onChange={(e) => setStdin(e.target.value)}
               spellCheck={false}
-              placeholder="Dados lidos por cin..."
-              aria-label="Entrada padrão do programa"
+              placeholder={tr('Dados lidos por cin...', 'Input read by cin...')}
+              aria-label={tr('Entrada padrão do programa', 'Standard input (stdin)')}
             />
           </div>
           </ResizablePanel>
-          <div className="trace-capture-settings"><label htmlFor="trace-capture-limit">Captura da visualização</label><select id="trace-capture-limit" value={tracePreset} disabled={isLoading || isRecording} onChange={event => setTracePreset(event.target.value as TracePreset)}>{Object.entries(TRACE_PRESETS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select><small>Capturas maiores podem levar mais tempo.</small></div>
+          <div className="trace-capture-settings"><label htmlFor="trace-capture-limit">{tr('Captura da visualização', 'Trace capture limit')}</label><select id="trace-capture-limit" value={tracePreset} disabled={isLoading || isRecording} onChange={event => setTracePreset(event.target.value as TracePreset)}>{Object.entries(TRACE_PRESETS).map(([key, value]) => <option key={key} value={key}>{isEn ? value.label.replace('Padrão', 'Standard').replace('Detalhada', 'Detailed').replace('Completa', 'Full').replace('passos', 'steps') : value.label}</option>)}</select><small>{tr('Capturas maiores podem levar mais tempo.', 'Higher limits may increase run time.')}</small></div>
           </div>
         </div>
 
@@ -746,10 +728,10 @@ export default function Home() {
           className={`visualizer-column ${fullscreen ? 'visualizer-fullscreen' : ''} ${isRecording ? 'visualizer-recording' : ''}`}
         >
           <div className="visualizer-header">
-            <button type="button" className="visualization-selection-trigger" aria-label="Alterar visualizações" aria-haspopup="dialog" disabled={isRecording || isLoading} onClick={() => setVisualizationPicker({ source: code, input: stdin, execute: false, available: steps.length ? traceVisualizationKeys(steps, untracedOutput) : undefined })}>
-              <SlidersHorizontal size={14} /><span>{visualizationSelectionLabel(visualizationSelection)}</span><small>alterar</small>
+            <button type="button" className="visualization-selection-trigger" aria-label={tr('Alterar visualizações', 'Change panels')} aria-haspopup="dialog" disabled={isRecording || isLoading} onClick={() => setVisualizationPicker({ source: code, input: stdin, execute: false, available: steps.length ? traceVisualizationKeys(steps, untracedOutput) : undefined })}>
+              <SlidersHorizontal size={14} /><span>{localizedVisualizationSelectionLabel(visualizationSelection, locale)}</span><small>{tr('alterar', 'change')}</small>
             </button>
-            {traceMode === 'automatic' && <span className="trace-mode-badge">automática</span>}
+            {traceMode === 'automatic' && <span className="trace-mode-badge">{tr('automática', 'auto')}</span>}
             <GraphToolbar
               layout={layout}
               onLayoutChange={setLayout}
@@ -776,8 +758,8 @@ export default function Home() {
             <div className={`recording-status recording-status-${recording.phase}`} role="status">
               {recording.phase === 'recording' && <span className="recording-dot" />}
               <span>{recording.message}</span>
-              {recording.progress !== undefined && isRecording && <progress value={recording.progress} max={1} aria-label="Progresso da gravação" />}
-              {recordingDownload && <a className="toolbar-button" href={recordingDownload.url} download={recordingDownload.filename}>Baixar MP4</a>}
+              {recording.progress !== undefined && isRecording && <progress value={recording.progress} max={1} aria-label={tr('Progresso da gravação', 'Recording progress')} />}
+              {recordingDownload && <a className="toolbar-button" href={recordingDownload.url} download={recordingDownload.filename}>{tr('Baixar MP4', 'Download MP4')}</a>}
             </div>
           )}
 
@@ -812,10 +794,10 @@ export default function Home() {
       </WorkspaceSplit>
 
       <footer className="workspace-footer">
-        <span><Clock3 className="h-3.5 w-3.5" /> passo {player.totalSteps ? player.currentStepIndex + 1 : 0} de {player.totalSteps}</span>
+        <span><Clock3 className="h-3.5 w-3.5" /> {tr('passo', 'step')} {player.totalSteps ? player.currentStepIndex + 1 : 0} {tr('de', 'of')} {player.totalSteps}</span>
         <span className="footer-divider" />
-        <span className="footer-visualization-selection">visualizações: {visualizationSelectionLabel(visualizationSelection)}</span>
-        <button className="footer-action" onClick={() => setShowDocumentation(true)} type="button"><CircleHelp className="h-3.5 w-3.5" /> documentação da API</button>
+        <span className="footer-visualization-selection">{tr('visualizações', 'panels')}: {localizedVisualizationSelectionLabel(visualizationSelection, locale)}</span>
+        <button className="footer-action" onClick={() => setShowDocumentation(true)} type="button"><CircleHelp className="h-3.5 w-3.5" /> {tr('documentação da API', 'API reference')}</button>
       </footer>
       {showDocumentation && <DocumentationPanel onClose={() => setShowDocumentation(false)} onLoad={loadDocumentationExample} />}
       {visualizationPicker && <VisualizationPicker selection={visualizationSelection} source={visualizationPicker.source} available={visualizationPicker.available} execute={visualizationPicker.execute} onClose={() => setVisualizationPicker(null)} onConfirm={selection => {

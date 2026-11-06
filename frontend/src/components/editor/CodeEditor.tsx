@@ -6,6 +6,7 @@ import type { editor as MonacoEditor } from 'monaco-editor';
 import { Settings2 } from 'lucide-react';
 import { ResizablePanel } from '@/components/workspace/ResizablePanel';
 import { useEditorSettings } from '@/hooks/useEditorSettings';
+import { useLocale } from '@/lib/i18n';
 import { ConfiguredMonacoEditor } from './ConfiguredMonacoEditor';
 
 const EditorSettingsDialog = dynamic(() => import('./EditorSettingsDialog').then((module) => module.EditorSettingsDialog), { ssr: false });
@@ -35,6 +36,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   logs = [],
   activeLine = null,
 }) => {
+  const { tr } = useLocale();
   const { settings, status, updateSettings, resetSettings } = useEditorSettings();
   const [showSettings, setShowSettings] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
@@ -102,16 +104,16 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           <span className="code-file-badge">C++17</span>
         </div>
         <div className="code-workbench-actions">
-          <button type="button" onClick={() => setShowSettings(true)} title="Personalizar editor" aria-label="Personalizar editor" aria-haspopup="dialog" className="editor-settings-trigger"><Settings2 size={14} /></button>
-          {isLoading && onCancel && <button type="button" onClick={onCancel} className="cancel-run">Cancelar execução</button>}
+          <button type="button" onClick={() => setShowSettings(true)} title={tr('Personalizar editor', 'Editor settings')} aria-label={tr('Personalizar editor', 'Editor settings')} aria-haspopup="dialog" className="editor-settings-trigger"><Settings2 size={14} /></button>
+          {isLoading && onCancel && <button type="button" onClick={onCancel} className="cancel-run">{tr('Cancelar execução', 'Cancel run')}</button>}
           <button
             type="button"
             onClick={onRun}
             disabled={isLoading || disabled}
-            title="Executar algoritmo (Ctrl+Enter ou ⌘+Enter)"
+            title={tr('Executar algoritmo (Ctrl+Enter ou ⌘+Enter)', 'Run algorithm (Ctrl+Enter or Cmd+Enter)')}
             className="run-algorithm-btn"
           >
-            {isLoading ? 'Executando...' : 'Executar Algoritmo'}
+            {isLoading ? tr('Executando...', 'Running...') : tr('Executar Algoritmo', 'Run Algorithm')}
           </button>
         </div>
       </div>
@@ -129,10 +131,10 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
       </ResizablePanel>
       {output && (
         <ResizablePanel title="Terminal" className="terminal-workspace" minHeight={40}>
-        <section className={`terminal-panel ${hasError ? 'terminal-panel-error' : ''}`} aria-label="Saída do terminal">
+        <section className={`terminal-panel ${hasError ? 'terminal-panel-error' : ''}`} aria-label={tr('Saída do terminal', 'Terminal output')}>
           <div className="terminal-header">
             <span>stdout / stderr</span>
-            <span className="terminal-status">{hasError ? 'erro' : 'saída'}</span>
+            <span className="terminal-status">{hasError ? tr('erro', 'error') : tr('saída', 'output')}</span>
           </div>
           <pre ref={outputRef} className="terminal-output">
             {output}

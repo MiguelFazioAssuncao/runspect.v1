@@ -183,48 +183,45 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   text-overflow: ellipsis;
 }
 
-.topbar-context, .run-state, .workspace-footer {
+.workspace-footer {
   color: var(--text-secondary);
   font: 11px var(--font-geist-mono);
   font-variant-numeric: tabular-nums;
 }
 
-.topbar-context {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  white-space: nowrap;
-}
-
-.topbar-divider {
-  width: 1px;
-  height: 12px;
-  background: var(--border-default);
-}
-
-.backend-indicator {
+.locale-switch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-recessed);
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
-.status-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: #10b981;
+.locale-btn {
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 10px var(--font-geist-mono);
+  letter-spacing: .04em;
+  cursor: pointer;
 }
-.status-dot-checking { background: #eab308; }
-.status-dot-disconnected { background: #ef4444; }
 
-.run-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-secondary);
+.locale-btn + .locale-btn {
+  border-left: 1px solid var(--border-subtle);
 }
-.run-state svg { color: #10b981; }
+
+.locale-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.locale-btn-active {
+  color: var(--text-primary);
+  background: var(--bg-control);
+}
 
 .section-kicker, .panel-label {
   color: var(--text-secondary);

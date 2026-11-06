@@ -3,6 +3,7 @@
 import React from 'react';
 import { ResizablePanel } from '@/components/workspace/ResizablePanel';
 import type { GraphAnalysis } from '@/lib/graphAnalysis';
+import { useLocale } from '@/lib/i18n';
 
 interface GraphAnalysisPanelProps {
   analysis: GraphAnalysis | null;
@@ -10,45 +11,48 @@ interface GraphAnalysisPanelProps {
 }
 
 export const GraphAnalysisPanel: React.FC<GraphAnalysisPanelProps> = ({ analysis, flowSummary }) => {
+  const { tr } = useLocale();
   if (!analysis) return null;
+  const yes = tr('sim', 'yes');
+  const no = tr('não', 'no');
   const rows = [
-    ['Vértices', analysis.nodeCount],
-    ['Arestas', analysis.edgeCount],
-    ['Componentes', analysis.componentCount],
-    ['Grau máximo', analysis.maxDegree],
-    ['Densidade', `${(analysis.density * 100).toFixed(0)}%`],
-    ['Conectado', analysis.connected ? 'sim' : 'não'],
-    ['Conect. fraca', analysis.weaklyConnected ? 'sim' : 'não'],
-    ['Conect. forte', analysis.stronglyConnected ? 'sim' : 'não'],
-    ['Comp. fortes', analysis.stronglyConnectedComponents],
-    ['Bipartido', analysis.bipartite ? 'sim' : 'não'],
-    ['Cíclico', analysis.cyclic ? 'sim' : 'não'],
-    ['Árvore', analysis.tree ? 'sim' : 'não'],
-    ['Floresta', analysis.forest ? 'sim' : 'não'],
-    ['Ciclo negativo', analysis.hasNegativeCycle ? 'sim' : 'não'],
-    ['Pontes', analysis.bridgeCount],
-    ['Articulações', analysis.articulationPointCount],
-    ['Euleriano', analysis.eulerian === 'none' ? 'não' : analysis.eulerian],
+    [tr('Vértices', 'Vertices'), analysis.nodeCount],
+    [tr('Arestas', 'Edges'), analysis.edgeCount],
+    [tr('Componentes', 'Components'), analysis.componentCount],
+    [tr('Grau máximo', 'Max degree'), analysis.maxDegree],
+    [tr('Densidade', 'Density'), `${(analysis.density * 100).toFixed(0)}%`],
+    [tr('Conectado', 'Connected'), analysis.connected ? yes : no],
+    [tr('Conect. fraca', 'Weakly conn.'), analysis.weaklyConnected ? yes : no],
+    [tr('Conect. forte', 'Strongly conn.'), analysis.stronglyConnected ? yes : no],
+    [tr('Comp. fortes', 'SCC count'), analysis.stronglyConnectedComponents],
+    [tr('Bipartido', 'Bipartite'), analysis.bipartite ? yes : no],
+    [tr('Cíclico', 'Cyclic'), analysis.cyclic ? yes : no],
+    [tr('Árvore', 'Tree'), analysis.tree ? yes : no],
+    [tr('Floresta', 'Forest'), analysis.forest ? yes : no],
+    [tr('Ciclo negativo', 'Negative cycle'), analysis.hasNegativeCycle ? yes : no],
+    [tr('Pontes', 'Bridges'), analysis.bridgeCount],
+    [tr('Articulações', 'Cut vertices'), analysis.articulationPointCount],
+    [tr('Euleriano', 'Eulerian'), analysis.eulerian === 'none' ? no : analysis.eulerian],
     ['Matching', analysis.matchingPairs.length],
-    ['Coloração', analysis.coloringCount],
-    ['Topológico', analysis.topologicalCycle ? 'ciclo' : analysis.topologicalOrder.length ? 'válido' : 'n/a'],
-    ['Completo', analysis.complete ? 'sim' : 'não'],
-    ['Hamiltoniano', analysis.hamiltonianPath === null ? 'grande demais' : analysis.hamiltonianPath ? 'caminho' : 'não'],
-    ['Ciclo Hamiltoniano', analysis.hamiltonianCycle === null ? 'grande demais' : analysis.hamiltonianCycle ? 'sim' : 'não'],
+    [tr('Coloração', 'Coloring'), analysis.coloringCount],
+    [tr('Topológico', 'Topological'), analysis.topologicalCycle ? tr('ciclo', 'cycle') : analysis.topologicalOrder.length ? tr('válido', 'valid') : 'n/a'],
+    [tr('Completo', 'Complete'), analysis.complete ? yes : no],
+    [tr('Hamiltoniano', 'Hamiltonian'), analysis.hamiltonianPath === null ? tr('grande demais', 'too large') : analysis.hamiltonianPath ? tr('caminho', 'path') : no],
+    [tr('Ciclo Hamiltoniano', 'Hamiltonian cycle'), analysis.hamiltonianCycle === null ? tr('grande demais', 'too large') : analysis.hamiltonianCycle ? yes : no],
   ];
   const advancedRows = [
-    ['Planaridade', analysis.planarity],
-    ['Clique máxima', analysis.maxClique.length],
-    ['Independente', analysis.independentSet.length],
-    ['Dominante', analysis.dominatingSet.length],
-    ['Matching ponderado', analysis.weightedMatchingPairs.length],
+    [tr('Planaridade', 'Planarity'), analysis.planarity],
+    [tr('Clique máxima', 'Max clique'), analysis.maxClique.length],
+    [tr('Independente', 'Independent set'), analysis.independentSet.length],
+    [tr('Dominante', 'Dominating set'), analysis.dominatingSet.length],
+    [tr('Matching ponderado', 'Weighted matching'), analysis.weightedMatchingPairs.length],
     ['Min-cut', analysis.minCutValue === null ? 'n/a' : analysis.minCutValue],
   ];
 
   return (
     <ResizablePanel title="Análise do grafo" className="analysis-workspace">
-    <section className="graph-analysis" aria-label="Análise do grafo">
-      <div className="graph-analysis-title">análise do grafo</div>
+    <section className="graph-analysis" aria-label={tr('Análise do grafo', 'Graph analysis')}>
+      <div className="graph-analysis-title">{tr('análise do grafo', 'graph analysis')}</div>
       <div className="graph-analysis-grid">
         {rows.map(([label, value]) => (
           <div className="graph-analysis-item" key={label}>
@@ -75,22 +79,22 @@ export const GraphAnalysisPanel: React.FC<GraphAnalysisPanelProps> = ({ analysis
       </ResizablePanel>
       {flowSummary && (
         <div className="graph-analysis-detail">
-          fluxo enviado: {flowSummary.flow} · custo total: {flowSummary.cost}
+          {tr('fluxo enviado', 'flow sent')}: {flowSummary.flow} · {tr('custo total', 'total cost')}: {flowSummary.cost}
         </div>
       )}
       {analysis.minCutSide.length > 0 && (
         <div className="graph-analysis-detail">
-          corte S: {analysis.minCutSide.join(', ')} · T: {analysis.nodeCount - analysis.minCutSide.length} vértices
+          {tr('corte S', 'cut S')}: {analysis.minCutSide.join(', ')} · T: {analysis.nodeCount - analysis.minCutSide.length} {tr('vértices', 'vertices')}
         </div>
       )}
       {analysis.matchingPairs.length > 0 && (
         <div className="graph-analysis-detail">
-          pares: {analysis.matchingPairs.map(([left, right]) => `${left}—${right}`).join(', ')}
+          {tr('pares', 'pairs')}: {analysis.matchingPairs.map(([left, right]) => `${left}-${right}`).join(', ')}
         </div>
       )}
       {analysis.topologicalOrder.length > 0 && !analysis.topologicalCycle && (
         <div className="graph-analysis-detail">
-          ordem: {analysis.topologicalOrder.join(' → ')}
+          {tr('ordem', 'order')}: {analysis.topologicalOrder.join(' -> ')}
         </div>
       )}
     </section>

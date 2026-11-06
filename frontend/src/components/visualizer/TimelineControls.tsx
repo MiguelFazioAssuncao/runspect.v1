@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Play, Pause, SkipBack, RotateCcw, SkipForward } from 'lucide-react';
+import { useLocale } from '@/lib/i18n';
 import { PLAYBACK_SPEEDS } from '@/lib/playback';
 
 interface TimelineControlsProps {
@@ -29,6 +30,7 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
   onSpeedChange,
   disabled = false,
 }) => {
+  const { tr } = useLocale();
   const hasSteps = totalSteps > 0;
   const controlsDisabled = !hasSteps || disabled;
   const completed = hasSteps && currentStep === totalSteps - 1;
@@ -41,8 +43,8 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
           onClick={() => onSeek(0)}
           disabled={controlsDisabled}
           className="timeline-btn"
-          title="Reiniciar"
-          aria-label="Reiniciar"
+          title={tr('Reiniciar', 'Restart')}
+          aria-label={tr('Reiniciar', 'Restart')}
         >
           <RotateCcw />
         </button>
@@ -51,8 +53,8 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
           onClick={onPrev}
           disabled={controlsDisabled}
           className="timeline-btn"
-          title="Anterior"
-          aria-label="Anterior"
+          title={tr('Anterior', 'Previous')}
+          aria-label={tr('Anterior', 'Previous')}
         >
           <SkipBack />
         </button>
@@ -61,8 +63,8 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
           onClick={onPlayToggle}
           disabled={controlsDisabled}
           className="timeline-btn timeline-btn-primary"
-          title={isPlaying ? 'Pausar' : 'Play'}
-          aria-label={isPlaying ? 'Pausar' : 'Play'}
+          title={isPlaying ? tr('Pausar', 'Pause') : 'Play'}
+          aria-label={isPlaying ? tr('Pausar', 'Pause') : 'Play'}
         >
           {isPlaying ? <Pause /> : <Play />}
         </button>
@@ -71,8 +73,8 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
           onClick={onNext}
           disabled={controlsDisabled}
           className="timeline-btn"
-          title="Próximo"
-          aria-label="Próximo"
+          title={tr('Próximo', 'Next')}
+          aria-label={tr('Próximo', 'Next')}
         >
           <SkipForward />
         </button>
@@ -80,9 +82,9 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
 
       <div className="timeline-progress">
         <span className="timeline-step">
-          Passo {hasSteps ? currentStep + 1 : 0} / {totalSteps}
+          {tr('Passo', 'Step')} {hasSteps ? currentStep + 1 : 0} / {totalSteps}
         </span>
-        {completed && <span className="timeline-completed" role="status">Concluído</span>}
+        {completed && <span className="timeline-completed" role="status">{tr('Concluído', 'Done')}</span>}
         <input
           type="range"
           min={0}
@@ -91,18 +93,18 @@ export const TimelineControls: React.FC<TimelineControlsProps> = ({
           onChange={(e) => onSeek(Number(e.target.value))}
           disabled={controlsDisabled}
           className="timeline-slider"
-          aria-label="Posição na linha do tempo"
+          aria-label={tr('Posição na linha do tempo', 'Timeline position')}
         />
       </div>
 
       <div className="timeline-speed">
-        <label htmlFor="playback-speed">Velocidade</label>
+        <label htmlFor="playback-speed">{tr('Velocidade', 'Speed')}</label>
         <select
           id="playback-speed"
           value={speed}
           onChange={(event) => onSpeedChange(Number(event.target.value))}
           disabled={disabled}
-          aria-label="Velocidade de reprodução"
+          aria-label={tr('Velocidade de reprodução', 'Playback speed')}
           className="timeline-speed-select"
         >
           {PLAYBACK_SPEEDS.map((value) => <option key={value} value={value}>{value}×</option>)}

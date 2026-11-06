@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Minus } from 'lucide-react';
+import { translatePanelTitle, useLocale } from '@/lib/i18n';
 
 // Recording renders the original content without interactive panel chrome.
 export const PanelInteractionContext = createContext(true);
@@ -17,6 +18,7 @@ export function ResizeHandle({ label, orientation = 'horizontal', value, min, ma
   onReset: () => void;
   className?: string;
 }) {
+  const { tr } = useLocale();
   const drag = useRef<{ origin: number; update: (delta: number) => void } | null>(null);
   const [dragging, setDragging] = useState(false);
   const coordinate = (event: React.PointerEvent) => orientation === 'vertical' ? event.clientX : event.clientY;
@@ -31,7 +33,7 @@ export function ResizeHandle({ label, orientation = 'horizontal', value, min, ma
     aria-valuenow={value === undefined ? undefined : Math.round(value)}
     aria-valuemin={min}
     aria-valuemax={max}
-    title={`${label} · arraste ou use as setas · clique duas vezes para restaurar`}
+    title={tr(`${label} · arraste ou use as setas · clique duas vezes para restaurar`, `${label} · drag or use arrow keys · double-click to reset`)}
     data-dragging={dragging}
     onPointerDown={event => {
       if (event.button !== 0 || !event.isPrimary) return;
@@ -72,6 +74,8 @@ export function ResizablePanel({ title, children, className = '', fill = false, 
   minHeight?: number;
 }) {
   const interactive = useContext(PanelInteractionContext);
+  const { locale, tr } = useLocale();
+  const displayTitle = translatePanelTitle(title, locale);
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [height, setHeight] = useState<number>();
   const body = useRef<HTMLDivElement>(null);
@@ -83,16 +87,16 @@ export function ResizablePanel({ title, children, className = '', fill = false, 
 
   return <section className={`resizable-panel ${fill ? 'resizable-panel-fill' : ''} ${className}`} data-collapsed={collapsed} data-sized={height !== undefined}>
     <div className="resizable-panel-header">
-      <button type="button" className="panel-fold-toggle" aria-expanded={!collapsed} aria-controls={id} aria-label={`${collapsed ? 'Restaurar' : 'Minimizar'} ${title}`} onClick={() => setCollapsed(!collapsed)}>
+      <button type="button" className="panel-fold-toggle" aria-expanded={!collapsed} aria-controls={id} aria-label={`${collapsed ? tr('Restaurar', 'Restore') : tr('Minimizar', 'Minimize')} ${displayTitle}`} onClick={() => setCollapsed(!collapsed)}>
         {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        <span>{title}</span>
+        <span>{displayTitle}</span>
         {!collapsed && <Minus size={13} className="panel-minimize-icon" />}
       </button>
     </div>
     <div ref={body} id={id} hidden={collapsed} className="resizable-panel-body" style={height === undefined ? undefined : { height }}>
       {children}
     </div>
-    {!collapsed && <ResizeHandle label={`Redimensionar ${title}`} value={height} min={minHeight} max={2000}
+    {!collapsed && <ResizeHandle label={`${tr('Redimensionar', 'Resize')} ${displayTitle}`} value={height} min={minHeight} max={2000}
       onStart={() => { const start = currentHeight(); return delta => setHeight(constrain(start + delta)); }}
       onAdjust={delta => setHeight(constrain(currentHeight() + delta))}
       onReset={() => setHeight(undefined)} />}

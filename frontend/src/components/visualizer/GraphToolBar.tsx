@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Download, Maximize2, Minimize2, Scan, Square, Video, ZoomIn, ZoomOut } from 'lucide-react';
+import { useLocale } from '@/lib/i18n';
 import type { GraphLayout } from './GraphCanvas';
 
 interface GraphToolbarProps {
@@ -40,7 +41,9 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   isFinalizing = false,
   onStartRecording,
   onStopRecording,
-}) => (
+}) => {
+  const { tr } = useLocale();
+  return (
   <div className="graph-toolbar">
     {hasGraph && <>
     <select
@@ -48,27 +51,27 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       value={layout}
       disabled={isRecording}
       onChange={(e) => onLayoutChange(e.target.value as GraphLayout)}
-      aria-label="Layout do grafo"
+      aria-label={tr('Layout do grafo', 'Graph layout')}
     >
-      <option value="force">Forças</option>
-      <option value="circular">Circular</option>
-      <option value="grid">Grade</option>
-      <option value="bipartite">Bipartido</option>
-      <option value="hierarchical">Hierárquico</option>
-      <option value="planar">Planar</option>
+      <option value="force">{tr('Forças', 'Force')}</option>
+      <option value="circular">{tr('Circular', 'Circular')}</option>
+      <option value="grid">{tr('Grade', 'Grid')}</option>
+      <option value="bipartite">{tr('Bipartido', 'Bipartite')}</option>
+      <option value="hierarchical">{tr('Hierárquico', 'Hierarchical')}</option>
+      <option value="planar">{tr('Planar', 'Planar')}</option>
     </select>
 
-    <button className="toolbar-button" onClick={onZoomOut} disabled={!hasGraph} title="Diminuir zoom" aria-label="Diminuir zoom" type="button">
+    <button className="toolbar-button" onClick={onZoomOut} disabled={!hasGraph} title={tr('Diminuir zoom', 'Zoom out')} aria-label={tr('Diminuir zoom', 'Zoom out')} type="button">
       <ZoomOut className="h-3 w-3" />
     </button>
-    <button className="toolbar-button" onClick={onZoomIn} disabled={!hasGraph} title="Aumentar zoom" aria-label="Aumentar zoom" type="button">
+    <button className="toolbar-button" onClick={onZoomIn} disabled={!hasGraph} title={tr('Aumentar zoom', 'Zoom in')} aria-label={tr('Aumentar zoom', 'Zoom in')} type="button">
       <ZoomIn className="h-3 w-3" />
     </button>
-    <button className="toolbar-button" onClick={onFit} disabled={!hasGraph} title="Ajustar à tela" aria-label="Ajustar à tela" type="button">
+    <button className="toolbar-button" onClick={onFit} disabled={!hasGraph} title={tr('Ajustar à tela', 'Fit to screen')} aria-label={tr('Ajustar à tela', 'Fit to screen')} type="button">
       <Scan className="h-3 w-3" />
     </button>
 
-    <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph || isRecording} title="Opções de download do grafo em SVG" aria-label="Exportar grafo em SVG" type="button">
+    <button className="toolbar-button" onClick={onExportSvg} disabled={!hasGraph || isRecording} title={tr('Opções de download do grafo em SVG', 'Export graph as SVG')} aria-label={tr('Exportar grafo em SVG', 'Export graph as SVG')} type="button">
       <Download className="h-3 w-3" /> SVG
     </button>
     </>}
@@ -77,23 +80,24 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
     </button>
 
     {isRecording ? (
-      <button className="toolbar-button toolbar-button-recording" onClick={onStopRecording} disabled={isFinalizing} title="Parar gravação" type="button">
-        <Square className="h-3 w-3" /> Parar
+      <button className="toolbar-button toolbar-button-recording" onClick={onStopRecording} disabled={isFinalizing} title={tr('Parar gravação', 'Stop recording')} type="button">
+        <Square className="h-3 w-3" /> {tr('Parar', 'Stop')}
       </button>
     ) : (
-      <button className="toolbar-button" onClick={onStartRecording} disabled={!canRecord} title="Gravar visualização" type="button">
-        <Video className="h-3 w-3" /> Gravar
+      <button className="toolbar-button" onClick={onStartRecording} disabled={!canRecord} title={tr('Gravar visualização', 'Record visualization')} type="button">
+        <Video className="h-3 w-3" /> {tr('Gravar', 'Record')}
       </button>
     )}
 
     <button
       className="toolbar-button"
       onClick={onToggleFullscreen}
-      title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'}
-      aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+      title={isFullscreen ? tr('Sair da tela cheia (Esc)', 'Exit fullscreen (Esc)') : tr('Tela cheia', 'Fullscreen')}
+      aria-label={isFullscreen ? tr('Sair da tela cheia', 'Exit fullscreen') : tr('Tela cheia', 'Fullscreen')}
       type="button"
     >
       {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
     </button>
   </div>
-);
+  );
+};
